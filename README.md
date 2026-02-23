@@ -49,7 +49,13 @@ Please refer to [docs/customized_deployment_guide.md](docs/customized_deployment
     > We use [Flexiv Rizon 4s](https://www.flexiv.com/products/rizon).
 - 1 USB camera or [RealSense](https://www.intelrealsense.com) camera.
     > We use an off-the-shelf USB camera for external camera.
-      Follow the [official document](https://dev.intelrealsense.com/docs/compiling-librealsense-for-linux-ubuntu-guide) to install librealsense2 if you use RealSense camera. 
+      Follow the [official document](https://dev.intelrealsense.com/docs/compiling-librealsense-for-linux-ubuntu-guide) to install librealsense2 if you use RealSense camera.
+- (Optional) A single-button keyboard for controlling kinematic teaching.
+  > We assign this button as the “pause” key. When the button is pressed, the robot can be dragged for teaching. You can modify the used key in [ImplicitRDP/real_world/kinematic_teaching/kineteach_controller.py](ImplicitRDP/real_world/kinematic_teaching/kineteach_controller.py).
+
+<p align="center">
+<img src="assets/hardware_settings.png" alt="hardware settings" style="width:50%;" />
+</p>
 
 ### Software
 1. Follow the [official document](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html) to install ROS2 Humble.
@@ -90,6 +96,7 @@ The environment and the task have to be configured first and then start several 
       # start data recorder
       python record_data.py --save_to_disk --vis_wrench --save_file_dir [task_data_dir] --save_file_name [record_seq_file_name]
       ```
+  3. Press the "pause" button to enable the kinematic teaching.
 
 ### Data Collection Tips
 Please refer to [docs/data_collection_tips.md](docs/data_collection_tips.md).
