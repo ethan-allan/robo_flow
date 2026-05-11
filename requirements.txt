@@ -1,10 +1,11 @@
+# Training-only dependency set (deployment / robot / sensor deps removed).
+# Install torch separately first:
+#   pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2
+
 numpy==1.26.4
 numba
 scipy
 opencv-python
-cffi
-ipykernel
-matplotlib
 zarr
 numcodecs
 h5py
@@ -12,43 +13,23 @@ hydra-core
 einops
 tqdm
 dill
-scikit-video
 scikit-image
-pymunk
-wandb
-threadpoolctl
-shapely
-cython
 imageio
 imageio-ffmpeg
-termcolor
+matplotlib
+threadpoolctl
+wandb
 tensorboard
 tensorboardx
 psutil
 click
-boto3
 accelerate
 datasets
 diffusers==0.33.1
-av
-cmake
 timm
 peft
-fastapi
-uvicorn
-pyrealsense2
 pydantic
 loguru
-bson
-open3d
 transforms3d
-pyinstrument
-py_cli_interaction
-pygame
-rerun-sdk
-pynput
-pyudev
-flexivrdk==1.7.0
-# install this by yourself
-# torch==2.2.2
-# torchvision==0.17.2
+termcolor
+cffi
