@@ -15,7 +15,6 @@ from ImplicitRDP.model.vision.transformer_obs_encoder import TransformerObsEncod
 from ImplicitRDP.model.vision.multi_image_obs_encoder import MultiImageObsEncoder
 from ImplicitRDP.model.diffusion.transformer_for_diffusion import TransformerForDiffusion
 from ImplicitRDP.model.vision.timm_obs_encoder import TimmObsEncoder
-from ImplicitRDP.model.force.rnn import RNN
 
 from loguru import logger
 
@@ -55,17 +54,12 @@ class DiffusionTransformerImagePolicy(BaseImagePolicy):
 
         all_extented_obs_keys = list(shape_meta['extended_obs'].keys()) if 'extended_obs' in shape_meta else []
         self.extented_obs_keys = sorted(all_extented_obs_keys)
-        temporal_cond_dim = sum([shape_meta['extended_obs'][extented_obs_key]['shape'][-1] for extented_obs_key in self.extented_obs_keys])
         if use_rnn_obs_encoder:
-            assert len(self.extented_obs_keys) > 0, "extended_obs is required for RNNObsEncoder"
-            self.rnn_obs_encoder = RNN(
-                input_dim=temporal_cond_dim,
-                hidden_dim=rnn_obs_encoder_hidden_dim,
-                layer_num=rnn_obs_encoder_n_layer,
-                n_emb=n_emb,
+            raise NotImplementedError(
+                "RNN obs encoder (force/wrench branch) was stripped. "
+                "Set use_rnn_obs_encoder=False or re-add ImplicitRDP/model/force/rnn.py."
             )
-        else:
-            self.rnn_obs_encoder = None
+        self.rnn_obs_encoder = None
 
         self.shape_meta = shape_meta
         self.obs_encoder = obs_encoder

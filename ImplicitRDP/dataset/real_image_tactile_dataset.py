@@ -19,11 +19,9 @@ from ImplicitRDP.common.normalize_util import (
 )
 from ImplicitRDP.common.action_utils import (
     absolute_actions_to_relative_actions,
-    get_inter_gripper_actions,
     matrix_actions_to_rpy_actions
 )
 from ImplicitRDP.common.space_utils import pose_3d_9d_to_homo_matrix_batch
-from ImplicitRDP.real_world.real_world_transforms import RealWorldTransforms
 
 from loguru import logger
 
@@ -97,7 +95,9 @@ class RealImageTactileDataset(BaseImageDataset):
         self.relative_action = relative_action
         self.relative_tcp_obs_for_relative_action = relative_tcp_obs_for_relative_action
         self.rpy_for_rotation = rpy_for_rotation
-        self.transforms = RealWorldTransforms(option=transform_params)
+        # Stripped: real-robot transforms (bimanual TCP frame conversions) removed.
+        # If you need inter-gripper relative actions, re-add RealWorldTransforms.
+        self.transforms = None
 
         key_first_k = dict()
         if n_obs_steps is not None:
@@ -295,17 +295,10 @@ class RealImageTactileDataset(BaseImageDataset):
                 if key not in self.extended_lowdim_keys:
                     del data[key]
 
-        # inter-gripper relative action
-        obs_dict.update(get_inter_gripper_actions(obs_dict, self.lowdim_keys, self.transforms))
-        for key in ['left_robot_wrt_right_robot_tcp_pose', 'right_robot_wrt_left_robot_tcp_pose']:
-            if key in obs_dict:
-                if len(self.shape_meta['obs'][key]['shape']) == 1:
-                    obs_dict[key] = obs_dict[key][:, :self.shape_meta['obs'][key]['shape'][0]].astype(np.float32)
-                elif len(self.shape_meta['obs'][key]['shape']) == 2:
-                    obs_dict[key] = obs_dict[key][:, :self.shape_meta['obs'][key]['shape'][0], :self.shape_meta['obs'][key]['shape'][1]].astype(np.float32)
-                else:
-                    raise ValueError(f"Only support 1d or 2d obs for inter-gripper relative action")
-        
+        # Stripped: bimanual inter-gripper relative action computation removed
+        # (kept the dataset single-arm / vision-only).
+
+
         extended_obs_dict = dict()
         for key in self.extended_rgb_keys:
             extended_obs_dict[key] = np.moveaxis(data[key],-1,1

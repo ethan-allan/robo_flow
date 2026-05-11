@@ -358,18 +358,9 @@ class TrainDiffusionTransformerImageWorkspace(BaseWorkspace):
                             step_log['val_loss'] = val_loss
 
                 def log_action_mse(step_log, category, pred_action, gt_action):
-                    action_type = cfg.task.env_runner.action_type
-                    use_rpy_for_rotation = cfg.task.dataset.rpy_for_rotation
                     B, T, _ = pred_action.shape
                     pred_action = pred_action.view(B, T, -1)
                     gt_action = gt_action.view(B, T, -1)
-                    if action_type in ['right_arm_6DOF_wrench', 'right_arm_6DOF_virtual_target_stiffness']:
-                        if use_rpy_for_rotation:
-                            pred_action = pred_action[..., :6]
-                            gt_action = gt_action[..., :6]
-                        else:
-                            pred_action = pred_action[..., :9]
-                            gt_action = gt_action[..., :9]
                     step_log[f'{category}_action_mse_error'] = torch.nn.functional.mse_loss(pred_action, gt_action)
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0 and accelerator.is_main_process:

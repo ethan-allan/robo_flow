@@ -5,6 +5,10 @@ data
 outputs
 data_local
 _wandb
+checkpoints/
+*.ckpt
+*.pt
+*.pth
 
 **/.DS_Store
 
@@ -140,6 +144,9 @@ dmypy.json
 
 # Virtual environment
 implicitrdp_venv/
+.venv/
+venv/
+env/
 
 # Editor settings
 .vscode/

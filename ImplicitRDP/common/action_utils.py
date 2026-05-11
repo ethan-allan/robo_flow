@@ -10,8 +10,6 @@ from ImplicitRDP.common.space_utils import (
     pose_3d_9d_to_homo_matrix_batch_torch,
     homo_matrix_to_pose_9d_batch_torch
 )
-from ImplicitRDP.real_world.real_world_transforms import RealWorldTransforms
-from ImplicitRDP.common.data_models import ActionType
 from typing import Optional
 
 def interpolate_actions_with_ratio(actions: np.ndarray, N: int):
@@ -239,7 +237,7 @@ def relative_actions_to_absolute_actions_batch_torch(
 
     return actions.reshape(action_shape)
 
-def get_inter_gripper_actions(obs_dict, lowdim_keys: dict, transforms: RealWorldTransforms):
+def get_inter_gripper_actions(obs_dict, lowdim_keys: dict, transforms):
     extra_obs_dict = dict()
     if 'left_robot_wrt_right_robot_tcp_pose' in lowdim_keys:
         base_absolute_action_in_world = homo_matrix_to_pose_9d_batch(
@@ -293,37 +291,6 @@ def matrix_actions_to_rpy_actions(actions: np.ndarray):
         action_list.append(pose_9d_to_pose_6d_batch(actions[:, tcp_dim]))
     if other_dim is not None:
         action_list.append(actions[:, other_dim]) 
-
-    return np.concatenate(action_list, axis=-1, dtype=actions.dtype)
-
-def rpy_actions_to_matrix_actions(actions: np.ndarray, action_type: ActionType):
-    T, D = actions.shape
-
-    if D == 6 or D == 7: # (x, y, z, r, p, y(, gripper_width))
-        tcp_dim_list = [np.arange(6)]
-        if D == 6:
-            other_dim = None
-        else:
-            other_dim = np.arange(6, D)
-    elif D == 12 or D == 13 or D == 14 or D == 19: # (x_l, y_l, z_l, r_l, p_l, y_l, x_r or virtual_x, y_r or virtual_y, z_r or virtual_z, r_r or virtual_r, p_r or virtual_p, y_r or virtual_y(, gripper_width_l, gripper_width_r) or (, stiffness, (, f_x, f_y, f_z, t_x, t_y, t_z)))
-        if action_type == ActionType.right_arm_6DOF_wrench:
-            tcp_dim_list = [np.arange(6)]
-            other_dim = np.arange(6, D)
-        else:
-            tcp_dim_list = [np.arange(6), np.arange(6, 12)]
-            if D == 12:
-                other_dim = None
-            else:
-                other_dim = np.arange(12, D)
-    else:
-        raise NotImplementedError
-    
-    action_list = []
-    for tcp_dim in tcp_dim_list:
-        assert len(tcp_dim) == 6, "Only support 6D tcp pose now"
-        action_list.append(pose_6d_to_pose_9d_batch(actions[:, tcp_dim]))
-    if other_dim is not None:
-        action_list.append(actions[:, other_dim])
 
     return np.concatenate(action_list, axis=-1, dtype=actions.dtype)
 
