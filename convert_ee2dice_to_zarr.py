@@ -1,11 +1,16 @@
 """Convert an ee2dice episode-directory dump into the ImplicitRDP replay-buffer zarr.
+Example usage:
+    python convert_ee2dice_to_zarr.py \
+        --src /path/to/ee2dice/dumps/2024-05-01 \
+        --dst /path/to/ImplicitRDP/data/ee2dice
+
 
 Source layout (one directory per episode, named by timestamp):
 
     <src_root>/<timestamp>/
         eef_state.npy   # (T, 7) float64  [xyz(3), axis_angle(3), gripper(1)]
         eef_action.npy  # (T, 7) float64  same layout
-        rgb_hand.npy    # (T, 256, 256, 3) uint8
+        rgb.npy    # (T, 256, 256, 3) uint8
 
 Output layout:
 
@@ -42,22 +47,28 @@ def pose7_to_pose9(arr: np.ndarray) -> np.ndarray:
     rot6d = axis_angle_to_rot6d(arr[:, 3:6])
     return np.concatenate([xyz, rot6d], axis=1).astype(np.float32)
 
+def bgr_to_rgb(arr: np.ndarray) -> np.ndarray:
+    """(T, H, W, 3) uint8 BGR -> RGB."""
+    assert arr.ndim == 4 and arr.shape[-1] == 3, f"expected (T,H,W,3), got {arr.shape}"
+    return arr[..., ::-1]
 
 def load_episode(ep_dir: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     eef_state = np.load(ep_dir / "eef_state.npy")
     eef_action = np.load(ep_dir / "eef_action.npy")
-    rgb_hand = np.load(ep_dir / "rgb_hand.npy")
+    rgb = np.load(ep_dir / "rgb.npy")
+    rgb = bgr_to_rgb(rgb)
 
     T = eef_state.shape[0]
-    assert eef_action.shape[0] == T and rgb_hand.shape[0] == T, (
+    assert eef_action.shape[0] == T and rgb.shape[0] == T, (
         f"{ep_dir.name}: T mismatch (state={eef_state.shape[0]} "
-        f"action={eef_action.shape[0]} rgb_hand={rgb_hand.shape[0]})"
+        f"action={eef_action.shape[0]} rgb={rgb.shape[0]})"
     )
-    assert rgb_hand.dtype == np.uint8 and rgb_hand.ndim == 4 and rgb_hand.shape[-1] == 3, (
-        f"{ep_dir.name}: rgb_hand expected (T,H,W,3) uint8, got {rgb_hand.shape} {rgb_hand.dtype}"
+    assert rgb.dtype == np.uint8 and rgb.ndim == 4 and rgb.shape[-1] == 3, (
+        f"{ep_dir.name}: rgb expected (T,H,W,3) uint8, got {rgb.shape} {rgb.dtype}"
     )
 
-    return pose7_to_pose9(eef_state), pose7_to_pose9(eef_action), rgb_hand
+
+    return pose7_to_pose9(eef_state), pose7_to_pose9(eef_action), rgb
 
 
 def main():
@@ -101,7 +112,7 @@ def main():
     img_compressor = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
 
     rgb_arr = data.create_dataset(
-        "rgb_hand",
+        "rgb",
         shape=(0, H, W, 3),
         chunks=(args.chunk_frames, H, W, 3),
         dtype="uint8",
@@ -142,7 +153,7 @@ def main():
     print(f"\nWrote {zarr_path}")
     print(f"  total frames: {total}")
     print(f"  episodes:     {len(episode_ends)}")
-    print(f"  rgb_hand:     {rgb_arr.shape} {rgb_arr.dtype}")
+    print(f"  rgb:     {rgb_arr.shape} {rgb_arr.dtype}")
     print(f"  eef_state:    {state_arr.shape} {state_arr.dtype}")
     print(f"  action:       {action_arr.shape} {action_arr.dtype}")
 
