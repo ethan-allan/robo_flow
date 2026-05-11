@@ -166,10 +166,12 @@ class SequenceSampler:
                 # performance optimization, only load used obs steps
                 n_data = buffer_end_idx - buffer_start_idx
                 k_data = min(first_k, n_data)
-                # fill value with Nan to catch bugs
-                # the non-loaded region should never be used
-                sample = np.full((n_data,) + input_arr.shape[1:], 
-                    fill_value=np.nan, dtype=input_arr.dtype)
+                # fill value with NaN (float) / 0 (int) to catch bugs:
+                # the non-loaded region should never be used. NaN can't be cast
+                # to integer dtypes — using 0 there avoids a numpy cast warning.
+                fill = np.nan if np.issubdtype(input_arr.dtype, np.floating) else 0
+                sample = np.full((n_data,) + input_arr.shape[1:],
+                    fill_value=fill, dtype=input_arr.dtype)
                 try:
                     sample[:k_data] = input_arr[buffer_start_idx:buffer_start_idx+k_data]
                 except Exception as e:
