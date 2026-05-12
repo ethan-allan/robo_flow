@@ -6,6 +6,12 @@ outputs
 data_local
 _wandb
 checkpoints/
+
+# raw dataset payloads — keep the dataset/ python module files,
+# but never commit anything inside its subdirectories (ee2dice, etc.)
+trainflow/dataset/*/
+ImplicitRDP/dataset/*/
+
 *.ckpt
 *.pt
 *.pth
