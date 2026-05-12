@@ -5,7 +5,7 @@ GPU_ID=0
 TASK="flip"
 DATASET_VERSION="v2"
 ACTION_TYPE="right_arm_6DOF_wrench"
-DATASET_PATH="/home/wendi/Desktop/ImplicitRDP/data/${TASK}_${DATASET_VERSION}_zarr"
+DATASET_PATH="/home/wendi/Desktop/trainflow/data/${TASK}_${DATASET_VERSION}_zarr"
 TRAINING_DEBUG=False
 LOGGING_MODE="online"
 

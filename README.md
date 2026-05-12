@@ -1,6 +1,6 @@
 # robo_flow
 
-A training-only package for **diffusion / flow / reactive diffusion policy** on robotic manipulation data, derived from [Chen-Wendi/ImplicitRDP](https://github.com/Chen-Wendi/ImplicitRDP) (MIT, © 2026 Wendi Chen) with the deployment, tactile, and force halves removed.
+A training-only package for **diffusion / flow / reactive diffusion policy** on robotic manipulation data, derived from [Chen-Wendi/trainflow](https://github.com/Chen-Wendi/trainflow) (MIT, © 2026 Wendi Chen) with the deployment, tactile, and force halves removed.
 
 You bring a zarr replay buffer of `(image, state, action)` trajectories; this package trains a policy on it via Hydra + accelerate + W&B.
 
@@ -52,13 +52,13 @@ At launch, `train.py`:
 **`shape_meta`** is the single source of truth — every component (dataset, encoder, policy) reads it. Once your zarr keys match `shape_meta`, no Python changes are needed.
 
 ```
-ImplicitRDP/
+trainflow/
 ├── train.py                      # Hydra entry point
 ├── inspect_zarr.py               # script to dump structure/shapes/plots from any zarr
 ├── convert_ee2dice_to_zarr.py    # example raw-→-zarr converter
 ├── scripts/                      # per-experiment launcher .sh wrappers (this is where YOU work)
 ├── requirements.txt
-└── ImplicitRDP/
+└── trainflow/
     ├── common/      # replay buffer, sampler, action utils, normalizers, EMA
     ├── config/
     │   ├── train_*_workspace.yaml      # workspace-level (paradigm) configs
@@ -78,7 +78,7 @@ ImplicitRDP/
 | `train.py` | Hydra entry. Resolves `--config-name=<workspace>` + `task=<task>` + CLI overrides, instantiates the workspace class, calls `.run()`. Never edit this. |
 | `convert_ee2dice_to_zarr.py` | Example raw-`.npy` → DP-style zarr converter for the ee2dice dataset layout. Copy + adapt for your own raw format. |
 | `inspect_zarr.py` | Diagnostic. Prints the zarr tree, shapes, dtypes, episode stats, value ranges. Saves a frame grid + lowdim/action plots to `inspect_out/`. Run any time you build a new zarr. |
-| `ImplicitRDP/notebooks/inspect_zarr.ipynb` | Same as the script but interactive — same knobs at the top of cell 1. |
+| `trainflow/notebooks/inspect_zarr.ipynb` | Same as the script but interactive — same knobs at the top of cell 1. |
 | `scripts/train_<task>_<paradigm>.sh` | Per-experiment wrapper. Holds the `accelerate launch` invocation + the hyperparameters you care to tune. This is the file you edit + commit. |
 
 ---
@@ -107,7 +107,7 @@ If you have ee2dice per-episode `.npy` dumps (`eef_state.npy`, `eef_action.npy`,
 
 ```bash
 python convert_ee2dice_to_zarr.py \
-    --src ImplicitRDP/dataset/ee2dice \
+    --src trainflow/dataset/ee2dice \
     --dst data/ee2dice_zarr
 ```
 
@@ -126,8 +126,8 @@ You should see (a) all expected keys present under `data/`, (b) image frames sho
 Copy a template and edit three things — the `name`, the `dataset_path`, and the `shape_meta` keys:
 
 ```bash
-cp ImplicitRDP/config/task/real_flip_image_dp_10fps.yaml \
-   ImplicitRDP/config/task/<your_task>.yaml
+cp trainflow/config/task/real_flip_image_dp_10fps.yaml \
+   trainflow/config/task/<your_task>.yaml
 ```
 
 ```yaml
@@ -148,7 +148,7 @@ shape_meta: &shape_meta
     shape: [9]                            # MUST match data/action width
 
 dataset:
-  _target_: ImplicitRDP.dataset.real_image_tactile_dataset.RealImageTactileDataset
+  _target_: trainflow.dataset.real_image_tactile_dataset.RealImageTactileDataset
   shape_meta: *shape_meta
   dataset_path: ${task.dataset_path}
   horizon: ${horizon}
@@ -203,7 +203,7 @@ A *paradigm* = a new training loop / policy / loss combo (e.g. flow matching, IB
 
 ### Step 1 — write the policy class
 
-New file at `ImplicitRDP/policy/<your_policy>.py`. Inherit from `policy/base_image_policy.py:BaseImagePolicy` and implement:
+New file at `trainflow/policy/<your_policy>.py`. Inherit from `policy/base_image_policy.py:BaseImagePolicy` and implement:
 
 ```python
 class YourPolicy(BaseImagePolicy):
@@ -235,10 +235,10 @@ If you need a different loop (e.g. a two-stage train), copy `train_diffusion_une
 Copy `config/train_diffusion_unet_real_image_workspace.yaml` to `config/train_<your_paradigm>_workspace.yaml`. Change:
 
 ```yaml
-_target_: ImplicitRDP.workspace.<your_workspace_module>.<YourWorkspaceClass>
+_target_: trainflow.workspace.<your_workspace_module>.<YourWorkspaceClass>
 
 policy:
-  _target_: ImplicitRDP.policy.<your_policy_module>.YourPolicy
+  _target_: trainflow.policy.<your_policy_module>.YourPolicy
   # policy-specific kwargs
 ```
 
@@ -316,7 +316,7 @@ git commit -am "ee2dice: lr 1e-4 -> 5e-5"  # snapshot
 Copy + override:
 
 ```yaml
-# ImplicitRDP/config/train_ee2dice_dp_small_workspace.yaml
+# trainflow/config/train_ee2dice_dp_small_workspace.yaml
 defaults:
   - train_diffusion_unet_real_image_workspace
   - override task: real_ee2_dice
@@ -466,7 +466,7 @@ accelerate launch train.py \
 
 ## 9. Credits
 
-Original work and the diffusion/RDP architectures: Wendi Chen et al. — [arXiv 2512.10946](https://arxiv.org/abs/2512.10946), upstream repo [Chen-Wendi/ImplicitRDP](https://github.com/Chen-Wendi/ImplicitRDP).
+Original work and the diffusion/RDP architectures: Wendi Chen et al. — [arXiv 2512.10946](https://arxiv.org/abs/2512.10946), upstream repo [Chen-Wendi/trainflow](https://github.com/Chen-Wendi/trainflow).
 
 ## License
 

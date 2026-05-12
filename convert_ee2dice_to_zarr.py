@@ -1,8 +1,8 @@
-"""Convert an ee2dice episode-directory dump into the ImplicitRDP replay-buffer zarr.
+"""Convert an ee2dice episode-directory dump into the trainflow replay-buffer zarr.
 Example usage:
     python convert_ee2dice_to_zarr.py \
         --src /path/to/ee2dice/dumps/2024-05-01 \
-        --dst /path/to/ImplicitRDP/data/ee2dice
+        --dst /path/to/trainflow/data/ee2dice
 
 
 Source layout (one directory per episode, named by timestamp):

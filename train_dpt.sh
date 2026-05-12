@@ -9,7 +9,7 @@ echo "Stage 1: training Policy..."
 CUDA_VISIBLE_DEVICES=0 accelerate launch train.py \
     --config-name=train_diffusion_transformer_real_image_workspace \
     task=real_flip_image_wrench_dpt_10fps \
-    task.dataset_path=/home/wendi/Desktop/ImplicitRDP/data/flip_v2_zarr \
+    task.dataset_path=/home/wendi/Desktop/trainflow/data/flip_v2_zarr \
     task.name=real_flip_image_wrench_dpt_10fps_v2 \
     policy.noise_scheduler.prediction_type=v_prediction \
     logging.mode=online
