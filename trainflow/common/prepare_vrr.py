@@ -136,6 +136,78 @@ def load_vrr_params(task_path: Path | None) -> dict:
     return params
 
 
+def run_for_src(src: Path, params: dict, out_name: str = "vrr_action.npy",
+                dry_run: bool = False, limit: int | None = None,
+                quiet: bool = False) -> dict:
+    """Walk every episode subdir under `src` and write `out_name` per episode.
+
+    Idempotent — overwrites existing files. Callable from other scripts
+    (e.g. zarr_writer) without spawning a subprocess.
+
+    Returns {"n_written": int, "n_skipped": int, "n_total": int}.
+    """
+    if not quiet:
+        print("VRR parameters:")
+        for k, v in params.items():
+            print(f"  {k:24s} {v}")
+        print()
+
+    eps = sorted(d for d in src.iterdir() if d.is_dir())
+    if limit is not None:
+        eps = eps[:limit]
+    if not eps:
+        raise SystemExit(f"No episode subdirs in {src}")
+    if not quiet:
+        print(f"Processing {len(eps)} episodes from {src}\n")
+
+    n_written = 0
+    n_skipped = 0
+    baselines = []
+    for ep in tqdm(eps, desc="episodes", disable=dry_run or quiet):
+        state_p = ep / "eef_state.npy"
+        force_p = ep / "eef_force.npy"
+        if not state_p.exists() or not force_p.exists():
+            tqdm.write(f"  skip {ep.name}: missing eef_state.npy or eef_force.npy")
+            n_skipped += 1
+            continue
+        state = np.load(state_p)
+        force = np.load(force_p)
+        if state.shape[0] != force.shape[0]:
+            tqdm.write(f"  skip {ep.name}: T mismatch state={state.shape[0]} force={force.shape[0]}")
+            n_skipped += 1
+            continue
+
+        force_t, baseline = tare_force(force, params["tare_frames"])
+        baselines.append(baseline)
+        action, stats = build_vrr_action(state, force_t, params)
+
+        if dry_run:
+            print(f"  {ep.name}  T={stats['T']:4d}  "
+                  f"|F| p50={stats['force_mag_p50']:6.3f}  p95={stats['force_mag_p95']:6.3f}  "
+                  f"K=[{stats['stiffness_min']:6.0f},{stats['stiffness_max']:6.0f}] mean={stats['stiffness_mean']:6.0f}  "
+                  f"v_off_max={stats['virtual_offset_max_m']*1000:.2f}mm  "
+                  f"baseline_F=[{baseline[0]:+6.3f},{baseline[1]:+6.3f},{baseline[2]:+6.3f}]")
+        else:
+            np.save(ep / out_name, action)
+            n_written += 1
+
+    if baselines and not quiet:
+        baselines = np.stack(baselines, axis=0)
+        print("\nPer-episode force baselines (subtracted from each episode):")
+        print(f"  mean across episodes: {baselines.mean(axis=0)}")
+        print(f"  std  across episodes: {baselines.std(axis=0)}")
+        print(f"  min/max per axis     min: {baselines.min(axis=0)}")
+        print(f"                       max: {baselines.max(axis=0)}")
+
+    if not quiet:
+        if dry_run:
+            print(f"\nDry run complete. Would have written {len(eps) - n_skipped} files.")
+        else:
+            print(f"\nWrote {n_written} files. Skipped {n_skipped}.")
+
+    return {"n_written": n_written, "n_skipped": n_skipped, "n_total": len(eps)}
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--src", type=Path, required=True,
@@ -156,61 +228,8 @@ def main():
     if args.tare_frames is not None:
         params["tare_frames"] = args.tare_frames
 
-    print("VRR parameters:")
-    for k, v in params.items():
-        print(f"  {k:24s} {v}")
-    print()
-
-    eps = sorted(d for d in args.src.iterdir() if d.is_dir())
-    if args.limit is not None:
-        eps = eps[:args.limit]
-    if not eps:
-        raise SystemExit(f"No episode subdirs in {args.src}")
-    print(f"Processing {len(eps)} episodes from {args.src}\n")
-
-    n_written = 0
-    n_skipped = 0
-    baselines = []
-    for ep in tqdm(eps, desc="episodes", disable=args.dry_run):
-        state_p = ep / "eef_state.npy"
-        force_p = ep / "eef_force.npy"
-        if not state_p.exists() or not force_p.exists():
-            tqdm.write(f"  skip {ep.name}: missing eef_state.npy or eef_force.npy")
-            n_skipped += 1
-            continue
-        state = np.load(state_p)
-        force = np.load(force_p)
-        if state.shape[0] != force.shape[0]:
-            tqdm.write(f"  skip {ep.name}: T mismatch state={state.shape[0]} force={force.shape[0]}")
-            n_skipped += 1
-            continue
-
-        force_t, baseline = tare_force(force, params["tare_frames"])
-        baselines.append(baseline)
-        action, stats = build_vrr_action(state, force_t, params)
-
-        if args.dry_run:
-            print(f"  {ep.name}  T={stats['T']:4d}  "
-                  f"|F| p50={stats['force_mag_p50']:6.3f}  p95={stats['force_mag_p95']:6.3f}  "
-                  f"K=[{stats['stiffness_min']:6.0f},{stats['stiffness_max']:6.0f}] mean={stats['stiffness_mean']:6.0f}  "
-                  f"v_off_max={stats['virtual_offset_max_m']*1000:.2f}mm  "
-                  f"baseline_F=[{baseline[0]:+6.3f},{baseline[1]:+6.3f},{baseline[2]:+6.3f}]")
-        else:
-            np.save(ep / args.out_name, action)
-            n_written += 1
-
-    if baselines:
-        baselines = np.stack(baselines, axis=0)
-        print("\nPer-episode force baselines (subtracted from each episode):")
-        print(f"  mean across episodes: {baselines.mean(axis=0)}")
-        print(f"  std  across episodes: {baselines.std(axis=0)}")
-        print(f"  min/max per axis     min: {baselines.min(axis=0)}")
-        print(f"                       max: {baselines.max(axis=0)}")
-
-    if args.dry_run:
-        print(f"\nDry run complete. Would have written {len(eps) - n_skipped} files.")
-    else:
-        print(f"\nWrote {n_written} files. Skipped {n_skipped}.")
+    run_for_src(args.src, params, out_name=args.out_name,
+                dry_run=args.dry_run, limit=args.limit)
 
 
 if __name__ == "__main__":

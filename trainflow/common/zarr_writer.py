@@ -183,6 +183,8 @@ def main():
                    help="Delete dst/replay_buffer.zarr if it exists.")
     p.add_argument("--chunk-frames", type=int, default=128,
                    help="rgb chunk frames (low-dim uses 16x this).")
+    p.add_argument("--no-derive", action="store_true",
+                   help="Skip the prepare_vrr step in VRR mode (use vrr_action.npy as-is).")
     args = p.parse_args()
 
     task_cfg = OmegaConf.load(args.task)
@@ -194,6 +196,17 @@ def main():
     pose_keys = resolve_pose_keys(task_cfg)
     action_type = task_cfg.get("action_type", None)
     print(f"action_type: {action_type or '(unset)'}")
+
+    # In VRR mode, derive per-episode vrr_action.npy from raw signals first,
+    # using the task cfg's `vrr:` block. Skip with --no-derive if you've
+    # already run prepare_vrr externally (e.g. with non-default CLI flags).
+    if action_type == VRR_ACTION_TYPE and not args.no_derive:
+        from trainflow.common.prepare_vrr import load_vrr_params, run_for_src
+        print(f"\n[VRR] auto-running prepare_vrr on {args.src} (use --no-derive to skip)")
+        run_for_src(args.src, load_vrr_params(args.task))
+        print("[VRR] prepare_vrr done\n")
+
+
     print("Keys to write:")
     for k, t in key_specs:
         flags = []
@@ -209,7 +222,7 @@ def main():
 
     task_name = task_cfg.get("name", args.task.stem)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = args.dst / f"{task_name}_{stamp}"
+    out_dir = args.dst / task_name
     out_dir.mkdir(parents=True, exist_ok=True)
     zarr_path = out_dir / "replay_buffer.zarr"
     if zarr_path.exists():
