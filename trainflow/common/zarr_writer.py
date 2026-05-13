@@ -6,7 +6,7 @@ episode directory.
 
 Example:
 
-    python zarr_writer.py \
+    python -m trainflow.common.zarr_writer \
         --src  trainflow/dataset/ee2dice \
         --task trainflow/config/task/real_ee2_dice.yaml \
         --dst  data/ee2dice_zarr
@@ -29,13 +29,48 @@ from tqdm import tqdm
 from trainflow.common.replay_buffer import ReplayBuffer
 
 
-# obs key -> filename when the two differ
-SOURCE_FILE_ALIASES = {
+# Builtin default: cfg key -> source filename when the two differ.
+# A task yaml can override / extend these via a top-level `source_aliases:` block.
+DEFAULT_SOURCE_ALIASES = {
     "action": "eef_action.npy",
 }
 
-# obs keys that need axis-angle (7) -> rot6d (9) conversion
-POSE_TRANSFORM_KEYS = {"eef_state", "eef_action", "action"}
+# Builtin default: cfg keys whose source file holds (T, 7) axis-angle pose
+# and needs 7 -> 9 ortho6d conversion (gripper channel dropped).
+# A task yaml can override the set via a top-level `pose_keys:` list.
+DEFAULT_POSE_KEYS = {"eef_state", "eef_action", "action"}
+
+# Marker for VRR-style tasks: action is precomputed (19-D) by prepare_vrr.py.
+VRR_ACTION_TYPE = "right_arm_6DOF_virtual_target_stiffness"
+VRR_ACTION_FILE = "vrr_action.npy"
+
+
+def resolve_source_aliases(task_cfg) -> dict[str, str]:
+    """Merge builtin defaults with task-cfg overrides.
+
+    VRR action type swaps the default `action` source to `vrr_action.npy`.
+    A `source_aliases:` block in the task yaml further overrides anything.
+    """
+    aliases = dict(DEFAULT_SOURCE_ALIASES)
+    if task_cfg.get("action_type") == VRR_ACTION_TYPE:
+        aliases["action"] = VRR_ACTION_FILE
+    user = task_cfg.get("source_aliases", {}) or {}
+    aliases.update(user)
+    return aliases
+
+
+def resolve_pose_keys(task_cfg) -> set[str]:
+    """Cfg keys whose source is (T, 7) axis-angle and needs 7 -> 9 conversion.
+
+    In VRR mode the action is precomputed 19-D, so `action` is dropped from the
+    default set. A `pose_keys:` list in the task yaml replaces the set entirely.
+    """
+    if "pose_keys" in task_cfg:
+        return set(task_cfg.pose_keys)
+    defaults = set(DEFAULT_POSE_KEYS)
+    if task_cfg.get("action_type") == VRR_ACTION_TYPE:
+        defaults.discard("action")
+    return defaults
 
 
 def axis_angle_to_rot6d(axis_angle: np.ndarray) -> np.ndarray:
@@ -74,12 +109,13 @@ def collect_keys(task_cfg) -> list[tuple[str, str]]:
     return out
 
 
-def source_file_for(key: str) -> str:
-    return SOURCE_FILE_ALIASES.get(key, f"{key}.npy")
+def source_file_for(key: str, aliases: dict[str, str]) -> str:
+    return aliases.get(key, f"{key}.npy")
 
 
-def load_key(ep_dir: Path, key: str, type_: str) -> np.ndarray:
-    fname = source_file_for(key)
+def load_key(ep_dir: Path, key: str, type_: str,
+             aliases: dict[str, str], pose_keys: set[str]) -> np.ndarray:
+    fname = source_file_for(key, aliases)
     path = ep_dir / fname
     if not path.exists():
         raise FileNotFoundError(
@@ -93,17 +129,19 @@ def load_key(ep_dir: Path, key: str, type_: str) -> np.ndarray:
                 f"got {arr.shape} {arr.dtype}"
             )
         arr = arr[..., ::-1]  # BGR -> RGB
-    if key in POSE_TRANSFORM_KEYS:
-        arr = pose7_to_pose9(arr)
-    return arr
+        return arr
+    if key in pose_keys:
+        return pose7_to_pose9(arr)            # already float32
+    return arr.astype(np.float32, copy=False)  # low_dim passthrough: enforce float32
 
 
-def load_episode(ep_dir: Path, keys: Iterable[tuple[str, str]]) -> dict[str, np.ndarray]:
+def load_episode(ep_dir: Path, keys: Iterable[tuple[str, str]],
+                 aliases: dict[str, str], pose_keys: set[str]) -> dict[str, np.ndarray]:
     out: dict[str, np.ndarray] = {}
     ref_T: int | None = None
     ref_key: str | None = None
     for key, type_ in keys:
-        arr = load_key(ep_dir, key, type_)
+        arr = load_key(ep_dir, key, type_, aliases, pose_keys)
         T = arr.shape[0]
         if ref_T is None:
             ref_T, ref_key = T, key
@@ -152,9 +190,17 @@ def main():
     key_types = {k: t for k, t in key_specs}
     if not key_specs:
         raise SystemExit(f"No keys found in {args.task} (shape_meta.{{obs,extended_obs,action}}).")
+    aliases = resolve_source_aliases(task_cfg)
+    pose_keys = resolve_pose_keys(task_cfg)
+    action_type = task_cfg.get("action_type", None)
+    print(f"action_type: {action_type or '(unset)'}")
     print("Keys to write:")
     for k, t in key_specs:
-        print(f"  {k:24s}  type={t}  source={source_file_for(k)}")
+        flags = []
+        if k in pose_keys: flags.append("pose7->9")
+        if t == "rgb":     flags.append("BGR->RGB")
+        flag_str = f"  [{','.join(flags)}]" if flags else ""
+        print(f"  {k:24s}  type={t}  source={source_file_for(k, aliases)}{flag_str}")
 
     episode_dirs = sorted(d for d in args.src.iterdir() if d.is_dir())
     if not episode_dirs:
@@ -177,7 +223,7 @@ def main():
     chunks: dict[str, tuple] | None = None
     cprs: dict[str, Blosc] | None = None
     for ep_dir in tqdm(episode_dirs, desc="episodes"):
-        data = load_episode(ep_dir, key_specs)
+        data = load_episode(ep_dir, key_specs, aliases, pose_keys)
         if chunks is None:
             chunks, cprs = build_chunks_and_compressors(
                 data, key_types, args.chunk_frames
@@ -185,7 +231,7 @@ def main():
         rb.add_episode(data, chunks=chunks, compressors=cprs)
 
     yaml = out_dir / "dataset_info.yaml"
-    write_yaml(yaml, task_name, stamp, args, key_specs, rb, cprs)
+    write_yaml(yaml, task_name, stamp, args, key_specs, rb, cprs, aliases, pose_keys)
 
     print(f"\nWrote {zarr_path}")
     print(f"  total frames: {rb.n_steps}")
@@ -196,19 +242,19 @@ def main():
     print(f"  yaml file:      {yaml}")
 
 
-def write_yaml(path, task_name, stamp, args, key_specs, rb, cprs):
+def write_yaml(path, task_name, stamp, args, key_specs, rb, cprs, aliases, pose_keys):
     arrays = {}
     for k, t in key_specs:
         arr = rb.data[k]
         steps = []
         if t == "rgb":
             steps.append("BGR -> RGB channel swap")
-        if k in POSE_TRANSFORM_KEYS:
+        if k in pose_keys:
             steps.append("axis-angle (T,7) -> rot6d (T,9) float32 (gripper dropped)")
         cpr = cprs.get(k) if cprs else None
         arrays[k] = {
             "type": t,
-            "source_file": source_file_for(k),
+            "source_file": source_file_for(k, aliases),
             "shape": list(arr.shape),
             "dtype": str(arr.dtype),
             "chunks": list(arr.chunks),

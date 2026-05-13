@@ -1,0 +1,80 @@
+name: real_dpt_vrr_10fps
+
+# Set to the directory containing replay_buffer.zarr/ for your VRR-built dataset.
+# Override on the CLI for one-off runs: task.dataset_path=...
+dataset_path: data/replay_buffers/real_dpt_vrr_10fps_TIMESTAMP
+
+image_shape: [3, 360, 640]
+
+# ---- zarr_writer hints ---------------------------------------------------
+# Activates VRR mode in zarr_writer.py: action source becomes vrr_action.npy
+# and the 7->9 transform is skipped for action (it's already 19-D).
+action_type: right_arm_6DOF_virtual_target_stiffness
+
+# Map cfg key names to per-episode source filenames.
+source_aliases:
+  right_wrist_img:        rgb.npy
+  right_robot_tcp_pose:   eef_state.npy
+  right_robot_tcp_wrench: eef_force.npy
+
+# Cfg keys whose source file holds (T, 7) axis-angle pose; need 7->9 conversion.
+pose_keys:
+  - right_robot_tcp_pose
+
+# ---- VRR action derivation parameters (read by prepare_vrr.py) -----------
+vrr:
+  k_max: 10000.0
+  k_min: 200.0
+  f_low: 0.5
+  f_high: 5.0
+  wrench_average_window: 1
+  tare_frames: 5
+
+# ---- raw zarr layout (what the dataset reads from disk) ------------------
+shape_meta:
+  obs:
+    right_wrist_img:
+      shape: ${task.image_shape}
+      type: rgb
+    right_robot_tcp_pose:
+      shape: [9]                # xyz + 6d rotation (post pose7->9)
+      type: low_dim
+    right_robot_tcp_wrench:
+      shape: [6]                # Fx Fy Fz Tx Ty Tz
+      type: low_dim
+  action:
+    shape: [19]                 # xyz, 6d rot, virtual_xyz, virtual_6d rot, stiffness
+
+# ---- post-conversion layout fed to the policy ---------------------------
+# `rpy_for_rotation: True` collapses every 9-D ortho6d rotation to a 6-D rpy
+# at __getitem__ time, so the model encoder must be sized for the collapsed
+# widths: 9 -> 6 (pose), 19 -> 13 (action).
+model_shape_meta:
+  obs:
+    right_wrist_img:
+      shape: ${task.image_shape}
+      type: rgb
+    right_robot_tcp_pose:
+      shape: [6]                # xyz + rpy
+      type: low_dim
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  action:
+    shape: [13]                 # xyz, rpy, virtual_xyz, virtual_rpy, stiffness
+
+dataset:
+  _target_: trainflow.dataset.real_image_tactile_dataset.RealImageTactileDataset
+  shape_meta: ${task.shape_meta}
+  dataset_path: ${task.dataset_path}
+  horizon: ${horizon}
+  pad_before: ${eval:'${dataset_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  n_latency_steps: ${n_latency_steps}
+  seed: 42
+  val_ratio: 0.1
+  max_train_episodes: null
+  delta_action: False
+  relative_action: True
+  rpy_for_rotation: True
