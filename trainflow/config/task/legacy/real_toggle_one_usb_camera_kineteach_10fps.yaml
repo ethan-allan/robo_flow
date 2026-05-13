@@ -1,0 +1,33 @@
+defaults:
+  - real_robot_env@_here_
+  - _self_
+
+teleop_server: null
+
+kineteach_controller:
+  host_ip: "192.168.2.242"
+  port: 8082
+  fps: 10
+  # teleoperation mode
+  robot_control_mode: 'right_arm_6DOF'
+  use_external_control: False
+  # kinematic teaching params
+  stiffness_ratio: [0.002, 0.002, 0.002, 0.0001, 0.0001, 0.0001]
+  damping: [0.6, 0.6, 0.6, 0.6, 0.6, 0.6]
+  # Low-pass filter parameter (0-1, smaller value means stronger smoothing)
+  filter_alpha: 1 # do not use low-pass filter
+  key_debounce_time: 0.5
+
+publisher:
+  robot_publisher:
+    fps: 20
+  # one USB camera
+  realsense_camera_publisher: null
+  usb_camera_publisher:
+    - camera_name: 'right_wrist_camera'
+      camera_type: 'USB'
+      fps: 10
+      cpu_core_id:
+        - 11
+        - 12
+        - 13

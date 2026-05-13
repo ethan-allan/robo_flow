@@ -1,0 +1,139 @@
+defaults:
+  - real_flip_one_usb_camera_kineteach_10fps@_here_
+  - _self_
+
+name: real_flip_image_wrench_implicitrdp_10fps
+
+image_shape: [3, 360, 640]
+dataset_path: data/flip_v1_zarr
+
+shape_meta:
+  # acceptable types: rgb, low_dim
+  obs:
+    right_wrist_img:
+      shape: ${task.image_shape}
+      type: rgb
+    right_robot_tcp_pose:
+      shape: [9]
+      type: low_dim
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  extended_obs: # for the AT RNN decoder of the latent diffusion policy
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  action:
+    shape: [19] # (3+6 + 3+6 + 1) (x, y, z, 6d rotation, virtual_x, virtual_y, virtual_z, virtual_6d rotation, stiffness)
+
+model_shape_meta:
+  # acceptable types: rgb, low_dim
+  obs:
+    right_wrist_img:
+      shape: ${task.image_shape}
+      type: rgb
+    right_robot_tcp_pose:
+      shape: [6]
+      type: low_dim
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  extended_obs: # for the AT RNN decoder of the latent diffusion policy
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  action:
+    shape: [13] # (3+3 + 3+3 + 1) (x, y, z, r, p, y, virtual_x, virtual_y, virtual_z, virtual_r, virtual_p, virtual_y, stiffness)
+
+env_runner:
+  _target_: ImplicitRDP.env_runner.real_stable_reactive_runner.RealStableReactiveRunner
+  eval_episodes: 200
+  max_duration_time: 20
+  tcp_action_update_interval: 6
+  gripper_action_update_interval: 6
+  tcp_pos_clip_range: # no clip for x, y, z
+    - [ -100, -100, -100 ]
+    - [ 100, 100, 100 ]
+  tcp_rot_clip_range: # no clip
+    - [ -100, -100, -100 ]
+    - [ 100, 100, 100 ]
+  latency_step: 2
+  gripper_latency_step: 2
+  control_fps: 10
+  n_obs_steps: ${n_obs_steps}
+  obs_temporal_downsample_ratio: 1
+  downsample_extended_obs: False
+  task_name: ${task_name}
+  transform_params: ${task.transforms}
+  shape_meta: ${task.shape_meta}
+  use_reactive_transformer: True
+  tcp_ensemble_buffer_params:
+    ensemble_mode: 'new'
+  gripper_ensemble_buffer_params:
+    ensemble_mode: 'new'
+  action_type: 'right_arm_6DOF_virtual_target_stiffness'
+  use_relative_action: ${task.dataset.relative_action}
+  use_rpy_for_rotation: ${task.dataset.rpy_for_rotation}
+  action_interpolation_ratio: 1
+  controller_server_ip: ${task.kineteach_controller.host_ip}
+  controller_server_port: ${task.kineteach_controller.port}
+  enable_video_recording: True
+  vcamera_server_ip:
+    - 192.168.2.242
+  vcamera_server_port:
+    - 8102
+  env_params:
+    robot_server_ip: ${task.robot_server.host_ip}
+    robot_server_port: ${task.robot_server.port}
+    device_mapping_server_ip: ${task.device_mapping_server.host_ip}
+    device_mapping_server_port: ${task.device_mapping_server.port}
+    data_processing_params:
+      # TODO: fix this (support left or right)
+      mode: 'dual_arm_two_realsense_four_tactile'
+      image_resize_shape: [640, 360]
+      pca_param_dict:
+        GelSight:
+          n_components: 15
+          normalize: False
+          mode: 'Eval'
+          store: False
+          transformation_matrix_path: 'data/PCA_Transform_GelSight/pca_transform_matrix.npy'
+          mean_matrix_path: 'data/PCA_Transform_GelSight/pca_mean_matrix.npy'
+        McTac:
+          n_components: 15
+          normalize: False
+          mode: 'Eval'
+          store: False
+          transformation_matrix_path: 'data/PCA_Transform_McTAC_v1/pca_transform_matrix.npy'
+          mean_matrix_path: 'data/PCA_Transform_McTAC_v1/pca_mean_matrix.npy'
+      use_6d_rotation: True
+      marker_dimension: 2
+      debug: False
+    max_fps: 10
+    debug: False
+    # gripper control params
+    # use_force_control_for_gripper: ${task.teleop_server.use_force_control_for_gripper}
+    # max_gripper_width: ${task.teleop_server.max_gripper_width}
+    # min_gripper_width: ${task.teleop_server.min_gripper_width}
+    # grasp_force: ${task.teleop_server.grasp_force}
+    # gripper_control_time_interval: ${task.teleop_server.gripper_control_time_interval}
+    # gripper_control_width_precision: ${task.teleop_server.gripper_control_width_precision}
+    # gripper_width_threshold: 0.046
+    # enable_gripper_width_clipping: True
+
+dataset:
+  _target_: ImplicitRDP.dataset.real_image_tactile_dataset.RealImageTactileDataset
+  shape_meta: ${task.shape_meta}
+  dataset_path: ${task.dataset_path}
+  horizon: ${horizon}
+  pad_before: ${eval:'${dataset_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${n_obs_steps}
+  obs_temporal_downsample_ratio: 1
+  n_latency_steps: ${n_latency_steps}
+  seed: 42
+  val_ratio: 0.1
+  max_train_episodes: null
+  delta_action: False
+  relative_action: True
+  rpy_for_rotation: True

@@ -1,6 +1,6 @@
 # robo_flow
 
-A training-only package for **diffusion / flow / reactive diffusion policy** on robotic manipulation data, derived from [Chen-Wendi/trainflow](https://github.com/Chen-Wendi/trainflow) (MIT, © 2026 Wendi Chen) with the deployment, tactile, and force halves removed.
+A training-only package for **diffusion / flow / reactive diffusion policy** on robotic manipulation data, derived from [Chen-Wendi/ImplicitRDP](https://github.com/Chen-Wendi/ImplicitRDP) (MIT, © 2026 Wendi Chen) with the deployment, tactile, and force halves removed.
 
 You bring a zarr replay buffer of `(image, state, action)` trajectories; this package trains a policy on it via Hydra + accelerate + W&B.
 
@@ -466,7 +466,7 @@ accelerate launch train.py \
 
 ## 9. Credits
 
-Original work and the diffusion/RDP architectures: Wendi Chen et al. — [arXiv 2512.10946](https://arxiv.org/abs/2512.10946), upstream repo [Chen-Wendi/trainflow](https://github.com/Chen-Wendi/trainflow).
+Original work and the diffusion/RDP architectures: Wendi Chen et al. — [arXiv 2512.10946](https://arxiv.org/abs/2512.10946), upstream repo [Chen-Wendi/ImplicitRDP](https://github.com/Chen-Wendi/ImplicitRDP).
 
 ## License
 
