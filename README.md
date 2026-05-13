@@ -54,12 +54,11 @@ At launch, `train.py`:
 ```
 trainflow/
 ├── train.py                      # Hydra entry point
-├── inspect_zarr.py               # script to dump structure/shapes/plots from any zarr
-├── convert_ee2dice_to_zarr.py    # example raw-→-zarr converter
 ├── scripts/                      # per-experiment launcher .sh wrappers (this is where YOU work)
 ├── requirements.txt
 └── trainflow/
     ├── common/      # replay buffer, sampler, action utils, normalizers, EMA
+    │                # + zarr_writer (cfg-driven raw-.npy -> zarr), prepare_vrr
     ├── config/
     │   ├── train_*_workspace.yaml      # workspace-level (paradigm) configs
     │   └── task/<task>.yaml            # per-dataset (task) configs
@@ -76,9 +75,9 @@ trainflow/
 | Script | Purpose |
 |---|---|
 | `train.py` | Hydra entry. Resolves `--config-name=<workspace>` + `task=<task>` + CLI overrides, instantiates the workspace class, calls `.run()`. Never edit this. |
-| `convert_ee2dice_to_zarr.py` | Example raw-`.npy` → DP-style zarr converter for the ee2dice dataset layout. Copy + adapt for your own raw format. |
-| `inspect_zarr.py` | Diagnostic. Prints the zarr tree, shapes, dtypes, episode stats, value ranges. Saves a frame grid + lowdim/action plots to `inspect_out/`. Run any time you build a new zarr. |
-| `trainflow/notebooks/inspect_zarr.ipynb` | Same as the script but interactive — same knobs at the top of cell 1. |
+| `trainflow/common/zarr_writer.py` | Config-driven raw-`.npy` → replay-buffer-zarr converter. Reads `shape_meta` (and optional `raw_episodes`, `vrr:` blocks) from the task yaml; writes one zarr array per declared key. Run as `python -m trainflow.common.zarr_writer --task <task>.yaml`. |
+| `trainflow/common/prepare_vrr.py` | Per-episode VRR action preprocessor. Auto-invoked by `zarr_writer` when `shape_meta.action.type == 6DOF_vrr`; can also be run standalone. |
+| `trainflow/notebooks/inspect_zarr.ipynb` | Interactive diagnostic notebook — prints the zarr tree, shapes, dtypes, episode stats, value ranges, and saves a frame grid + lowdim/action plots. Run any time you build a new zarr. |
 | `scripts/train_<task>_<paradigm>.sh` | Per-experiment wrapper. Holds the `accelerate launch` invocation + the hyperparameters you care to tune. This is the file you edit + commit. |
 
 ---
@@ -103,23 +102,24 @@ The trainer reads a single zarr directory in this layout:
 
 `N` is total frames across all episodes concatenated. `episode_ends[i]` is the index just past the last frame of episode `i`.
 
-If you have ee2dice per-episode `.npy` dumps (`eef_state.npy`, `eef_action.npy`, `rgb.npy`, ...):
+Use the config-driven `zarr_writer`. It reads `shape_meta` from your task yaml and writes one zarr array per declared key, pulling each from the matching `<key>.npy` file in each episode directory:
 
 ```bash
-python convert_ee2dice_to_zarr.py \
-    --src trainflow/dataset/ee2dice \
-    --dst data/ee2dice_zarr
+python -m trainflow.common.zarr_writer \
+    --task trainflow/config/task/<your_task>.yaml \
+    --src  /path/to/episode_dirs   # optional if task.raw_episodes is set
 ```
 
-For any other source format, copy `convert_ee2dice_to_zarr.py` and adapt the `load_episode` function. Rotations should be encoded as 6D (Zhou et al. 2019); the file has a reference `axis_angle_to_rot6d` you can reuse.
+Built-in transforms applied per key (driven off the cfg, not the filename):
+- `type: rgb` → BGR → RGB channel swap.
+- keys named `eef_state` / `eef_action` / `action` → `(T, 7)` axis-angle pose → `(T, 9)` rot6d (gripper dropped). Override the set via a top-level `pose_keys:` list in the task yaml; remap source filenames via `source_aliases:`.
+- `shape_meta.action.type: 6DOF_vrr` → auto-invokes `prepare_vrr.py` first to derive a per-episode `vrr_action.npy` from `eef_state.npy` + `eef_force.npy`. VRR params come from a top-level `vrr:` block in the task yaml.
+
+The writer also drops a `dataset_info.yaml` next to the zarr summarizing what it wrote (per-array shape/dtype/chunks/compressor + provenance).
 
 ### Step 2 — sanity-check the zarr
 
-```bash
-python inspect_zarr.py --zarr data/<your_zarr>
-```
-
-You should see (a) all expected keys present under `data/`, (b) image frames showing actual content, (c) lowdim plots showing the trajectories vary sensibly. If `rgb` is all-zero or rotation is exactly constant across frames, you have a converter bug — fix before training.
+Open `trainflow/notebooks/inspect_zarr.ipynb`, set the path at the top of cell 1, run all. You should see (a) all expected keys present under `data/`, (b) image frames showing actual content, (c) lowdim plots showing the trajectories vary sensibly. If `rgb` is all-zero or rotation is exactly constant across frames, you have a converter bug — fix before training.
 
 ### Step 3 — write a task YAML
 
@@ -464,7 +464,82 @@ accelerate launch train.py \
 
 ---
 
-## 9. Credits
+## 9. Known rough edges / future cleanups
+
+The data → zarr → training pipeline works but the "task cfg dictates the whole process" goal isn't fully met yet. Open items, roughly in order of effort:
+
+### a. `raw_episodes` missing from most task yamls
+Only `peg_insertion_vrr_5fps.yaml` declares `raw_episodes:`. The others force the user to pass `--src` on the CLI, which means rerunning the zarr build six months later requires remembering the source path. **Fix:** add `raw_episodes: <path>` next to `dataset_path:` in every task yaml; consider making it required in `zarr_writer` (error if both `--src` and `task.raw_episodes` are absent).
+
+### b. No single command for data → zarr → train
+Today a new-task user runs `zarr_writer`, then opens `inspect_zarr.ipynb`, then `bash scripts/train_*.sh` — three steps, easy to skip the rebuild after editing a task yaml. **Fix:** in `BaseWorkspace.run()` (or at the top of `train.py`), check `cfg.task.dataset_path/replay_buffer.zarr` and call `zarr_writer.build_from_cfg(cfg.task)` if missing. Needs `zarr_writer.main()` refactored into a library `build_from_cfg(task_cfg, src=None, overwrite=False)` function (the CLI becomes a thin shim). Print "using existing zarr at <path> (built <date>)" on reuse; document `rm -rf <dataset_path>/replay_buffer.zarr` as the way to force a rebuild.
+
+### c. Magic-string dispatch leaks dataset behavior outside the cfg
+Behaviorally significant decisions are made by substring-matching key names:
+- `zarr_writer.py`: `DEFAULT_POSE_KEYS = {"eef_state", "eef_action", "action"}` triggers `pose7_to_pose9`. `DEFAULT_SOURCE_ALIASES = {"action": "eef_action.npy"}` remaps cfg key to source filename. `"wrt" in name` silently skips bimanual relative-pose keys.
+- `real_image_tactile_dataset.py`: `'robot_tcp_pose' in key` selects pose-aware normalizer and gates relative-action / rpy transforms. `'wrt' in key` gates bimanual code paths. `'left_robot_tcp_pose'` / `'right_robot_tcp_pose'` are hardcoded.
+
+Rename a key from `eef_state` to `tcp_state` and the rot6d conversion silently stops happening — no error, just wrong data. **Fix:** move dispatch into explicit per-key `shape_meta` attributes:
+```yaml
+obs:
+  eef_state:
+    shape: [9]
+    type: low_dim
+    source: { file: eef_state.npy, transform: pose7_to_pose9 }
+    normalizer: pose            # pose | identity | image_range | minmax
+  left_robot_tcp_pose:
+    shape: [9]
+    type: low_dim
+    normalizer: pose
+    relative_to: right_robot_tcp_pose   # replaces the `wrt`-substring dispatch
+```
+`transform` / `normalizer` resolve via small registries in `transforms.py` / `normalize_util.py`. Collapses ~80 lines of nested ifs in `get_normalizer` into one table-driven loop; bimanual code stops running when no key sets `relative_to:`.
+
+### d. VRR auto-derive is hardcoded — preprocessors don't compose
+`zarr_writer.py:227` special-cases `action_type == "6DOF_vrr"` to run `prepare_vrr`. Any second preprocessor (delta-action precompute, image rectification, force-tare-only) requires editing `zarr_writer.py`. **Fix:** Hydra-instantiable list in the task yaml, mirroring how `dataset:` / `policy:` already work:
+```yaml
+preprocess:
+  - _target_: trainflow.common.prepare_vrr.run_for_src
+    src: ${task.raw_episodes}
+    params: ${task.vrr}
+```
+Then `zarr_writer.build_from_cfg` just loops `hydra.utils.instantiate(spec)` over `task_cfg.preprocess`. Each preprocessor must be idempotent (writes `<name>.npy` per episode, overwrites OK). Once this lands, the VRR-specific branches in `resolve_source_aliases` / `resolve_pose_keys` can also go — `shape_meta.action.type: 6DOF_vrr` stays as a human-readable label but no longer gates code.
+
+### e. No val-side action-MSE for top-k checkpoint selection
+`checkpoint.topk.monitor_key` defaults to `train_loss` (ε-MSE on noise prediction, train batches). Switching to `val_loss` is a one-line yaml change and catches overfit, but both metrics are still ε-MSE — dominated by easy high-noise timesteps and only loosely correlated with closed-loop action quality. `train_action_mse_error` is action-space (xyz+rpy MSE) but only on a training batch, so it doesn't catch overfit.
+
+**Fix:** add `val_action_mse_error` alongside `train_action_mse_error` in `workspace/train_diffusion_unet_image_workspace.py`. Mirror the existing sample block at ~`:330-359`:
+```python
+# after the val_loss block, still inside `if (self.epoch % cfg.training.sample_every) == 0:`
+with torch.no_grad():
+    val_batch = dict_apply(val_sampling_batch, lambda x: x.to(device, non_blocking=True))
+    result = policy.predict_action(val_batch['obs'])
+    pred_action = result['action_pred']
+    all_preds, all_gt = accelerator.gather_for_metrics((pred_action, val_batch['action']))
+    if pred_action.shape[-1] in [12, 13, 19]:
+        all_preds = all_preds[..., :6]
+        all_gt = all_gt[..., :6]
+    step_log['val_action_mse_error'] = torch.nn.functional.mse_loss(all_preds, all_gt).item()
+```
+You'll need to capture `val_sampling_batch` from the val loader the same way `train_sampling_batch` is captured (one batch per epoch, kept around for the sample step). Then point `checkpoint.topk` at it:
+```yaml
+checkpoint:
+  topk:
+    monitor_key: val_action_mse_error
+    mode: min
+    k: 5
+    format_str: 'epoch={epoch:04d}-val_action_mse={val_action_mse_error:.4f}.ckpt'
+```
+Make sure `checkpoint_every` stays a multiple of `sample_every` — `val_action_mse_error` is only in `step_log` on sample epochs, and `TopKCheckpointManager.get_ckpt_path` will `KeyError` if the key is missing (`common/checkpoint_util.py:26`).
+
+### f. Other smaller items
+- `peg_insertion_vrr_5fps.yaml` declares both `shape_meta` (19-D action, what's stored in zarr) and `model_shape_meta` (13-D, post-`rpy_for_rotation`). Express the collapse as one attribute (`action: { storage_shape: [19], model_shape: [13], collapse: rot6d_to_rpy }`) and halve the cfg.
+- `pad_before` / `pad_after` `${eval:...}` expressions, `seed: 42`, `val_ratio: 0.1`, `delta_action: False`, and the dataset `_target_` are duplicated across every task yaml. These are paradigm-level defaults that belong in the workspace yaml (or a shared default fragment).
+- `pose7_to_pose9` / `axis_angle_to_rot6d` live in both `prepare_vrr.py` and `zarr_writer.py`. Pick one home (likely `space_utils.py`).
+
+---
+
+## 10. Credits
 
 Original work and the diffusion/RDP architectures: Wendi Chen et al. — [arXiv 2512.10946](https://arxiv.org/abs/2512.10946), upstream repo [Chen-Wendi/ImplicitRDP](https://github.com/Chen-Wendi/ImplicitRDP).
 

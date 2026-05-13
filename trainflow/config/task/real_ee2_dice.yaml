@@ -2,6 +2,7 @@
 name: real_ee2_dice
 
 image_shape: [3, 256, 256]
+image_resize_shape: null   # square source; no encoder-side resize
 dataset_path: data/ee2dice_zarr
 
 shape_meta: &shape_meta

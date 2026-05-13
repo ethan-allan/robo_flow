@@ -6,7 +6,12 @@ name: train_diffusion_transformer_image
 _target_: trainflow.workspace.train_diffusion_transformer_image_workspace.TrainDiffusionTransformerImageWorkspace
 
 task_name: ${task.name}
-shape_meta: ${task.shape_meta}
+# Policy/obs-encoder shape_meta. Falls back to task.shape_meta unless the task
+# declares a separate model_shape_meta (e.g. when rpy_for_rotation collapses
+# ortho6d action columns and the policy needs the post-collapse dim).
+# The dataset always reads task.shape_meta directly — its action slice must
+# match the raw zarr layout, not the post-collapse layout.
+shape_meta: ${oc.select:task.model_shape_meta,${task.shape_meta}}
 exp_name: "default"
 
 horizon: 16
@@ -165,6 +170,17 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
+  # Early stopping. Check fires inside the existing checkpoint_every branch,
+  # so any break happens immediately after a save. Patience counts
+  # *checkpoint events* without an improvement greater than min_delta.
+  # monitor_key must be present in step_log at every checkpoint event:
+  # val_action_mse_error requires sample_every | checkpoint_every and val_ratio>0.
+  early_stopping:
+    enabled: false
+    monitor_key: val_action_mse_error
+    mode: min
+    patience: 10
+    min_delta: 1.0e-4
 
 logging:
   project: diffusion_policy_transformer_tactile
@@ -177,10 +193,14 @@ logging:
 
 checkpoint:
   topk:
-    monitor_key: train_loss
+    # val_action_mse_error is logged in workspace .py via log_action_mse(..., 'val', ...)
+    # whenever (epoch % sample_every) == 0 and val_dataloader is non-empty.
+    # Keep checkpoint_every a multiple of sample_every or this key will be missing
+    # and TopKCheckpointManager.get_ckpt_path will KeyError.
+    monitor_key: val_action_mse_error
     mode: min
     k: 1
-    format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
+    format_str: 'epoch={epoch:04d}-val_action_mse={val_action_mse_error:.4f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False
 

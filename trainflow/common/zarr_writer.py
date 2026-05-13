@@ -41,8 +41,19 @@ DEFAULT_SOURCE_ALIASES = {
 DEFAULT_POSE_KEYS = {"eef_state", "eef_action", "action"}
 
 # Marker for VRR-style tasks: action is precomputed (19-D) by prepare_vrr.py.
-VRR_ACTION_TYPE = "right_arm_6DOF_virtual_target_stiffness"
+VRR_ACTION_TYPE = "6DOF_vrr"
 VRR_ACTION_FILE = "vrr_action.npy"
+
+
+def get_action_type(task_cfg) -> str | None:
+    """Read the action_type from `shape_meta.action.type` in the task cfg.
+
+    Returns None if not set. Used to gate VRR-specific behavior in the writer
+    (auto-derive, source-file swap, skip pose7->9 on action).
+    """
+    sm = task_cfg.get("shape_meta", {}) or {}
+    action_block = sm.get("action", {}) or {}
+    return action_block.get("type", None)
 
 
 def resolve_source_aliases(task_cfg) -> dict[str, str]:
@@ -52,7 +63,7 @@ def resolve_source_aliases(task_cfg) -> dict[str, str]:
     A `source_aliases:` block in the task yaml further overrides anything.
     """
     aliases = dict(DEFAULT_SOURCE_ALIASES)
-    if task_cfg.get("action_type") == VRR_ACTION_TYPE:
+    if get_action_type(task_cfg) == VRR_ACTION_TYPE:
         aliases["action"] = VRR_ACTION_FILE
     user = task_cfg.get("source_aliases", {}) or {}
     aliases.update(user)
@@ -68,7 +79,7 @@ def resolve_pose_keys(task_cfg) -> set[str]:
     if "pose_keys" in task_cfg:
         return set(task_cfg.pose_keys)
     defaults = set(DEFAULT_POSE_KEYS)
-    if task_cfg.get("action_type") == VRR_ACTION_TYPE:
+    if get_action_type(task_cfg) == VRR_ACTION_TYPE:
         defaults.discard("action")
     return defaults
 
@@ -173,8 +184,9 @@ def build_chunks_and_compressors(
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--src", type=Path, required=True,
-                   help="Root containing one subdir per episode.")
+    p.add_argument("--src", type=Path, required=False,
+                   help="Root containing one subdir per episode. "
+                        "Defaults to task.raw_episodes from the cfg.")
     p.add_argument("--task", type=Path, required=True,
                    help="Task YAML with shape_meta.")
     p.add_argument("--dst", type=Path, required=False, default=Path("data/replay_buffers"),
@@ -188,13 +200,25 @@ def main():
     args = p.parse_args()
 
     task_cfg = OmegaConf.load(args.task)
+
+    # Resolve --src from cfg if not passed on the CLI.
+    if args.src is None:
+        if "raw_episodes" not in task_cfg:
+            raise SystemExit(
+                "No --src provided and task.raw_episodes is missing from the cfg. "
+                "Either pass --src, or add `raw_episodes: <path>` to the task yaml."
+            )
+        args.src = Path(task_cfg.raw_episodes)
+    if not args.src.is_dir():
+        raise SystemExit(f"--src {args.src} is not a directory.")
+
     key_specs = collect_keys(task_cfg)
     key_types = {k: t for k, t in key_specs}
     if not key_specs:
         raise SystemExit(f"No keys found in {args.task} (shape_meta.{{obs,extended_obs,action}}).")
     aliases = resolve_source_aliases(task_cfg)
     pose_keys = resolve_pose_keys(task_cfg)
-    action_type = task_cfg.get("action_type", None)
+    action_type = get_action_type(task_cfg)
     print(f"action_type: {action_type or '(unset)'}")
 
     # In VRR mode, derive per-episode vrr_action.npy from raw signals first,
@@ -215,14 +239,21 @@ def main():
         flag_str = f"  [{','.join(flags)}]" if flags else ""
         print(f"  {k:24s}  type={t}  source={source_file_for(k, aliases)}{flag_str}")
 
-    episode_dirs = sorted(d for d in args.src.iterdir() if d.is_dir())
+    # Only treat a subdir as an episode if it actually has the first cfg key's
+    # source file. Skips stray dirs like `replay_buffer.zarr` left in --src.
+    first_key, _ = key_specs[0]
+    first_file = source_file_for(first_key, aliases)
+    episode_dirs = sorted(d for d in args.src.iterdir()
+                          if d.is_dir() and (d / first_file).exists())
     if not episode_dirs:
         raise SystemExit(f"No episode subdirectories found in {args.src}")
     print(f"Found {len(episode_dirs)} episodes in {args.src}")
 
     task_name = task_cfg.get("name", args.task.stem)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = args.dst / task_name
+    # Prefer the cfg's dataset_path so it stays the single source of truth
+    # for both the writer (output) and the dataset class (input).
+    out_dir = Path(task_cfg.dataset_path) if "dataset_path" in task_cfg else args.dst / task_name
     out_dir.mkdir(parents=True, exist_ok=True)
     zarr_path = out_dir / "replay_buffer.zarr"
     if zarr_path.exists():

@@ -1,8 +1,12 @@
 
-name: real_dpt_vrr_10fps
+name: peg_insertion_vrr_5fps
 
 image_shape: [3, 256, 256]
-dataset_path: data/replay_buffers/real_dpt_vrr_10fps
+# Square 1:1 source. null = no resize inside encoder (Identity). Do NOT set a
+# non-square value here — torchvision.transforms.Resize((h,w)) stretches.
+image_resize_shape: null
+raw_episodes: trainflow/dataset/peg_hole_tac          # source: per-episode .npy dirs
+dataset_path: data/replay_buffers/peg_insertion_vrr_5fps  # destination: bundled zarr
 
 shape_meta:
   # acceptable types: rgb, low_dim
@@ -32,7 +36,7 @@ model_shape_meta:
       shape: [6]
       type: low_dim
   action:
-    shape: [13] # (3+6 + 3+6 + 1) (x, y, z, 6d rotation, virtual_x, virtual_y, virtual_z, virtual_6d rotation, stiffness)
+    shape: [13] # (3+3 + 3+3 + 1) (x, y, z, r, p, y, virtual_x, virtual_y, virtual_z, virtual_r, virtual_p, virtual_y, stiffness) — collapsed from 19D ortho6d via rpy_for_rotation
     type: 6DOF_vrr
 
 

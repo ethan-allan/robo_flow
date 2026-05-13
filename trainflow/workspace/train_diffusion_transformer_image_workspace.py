@@ -256,6 +256,15 @@ class TrainDiffusionTransformerImageWorkspace(BaseWorkspace):
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
+        # early-stopping state. monitor_key must land in step_log at every
+        # checkpoint event (see comment on cfg.training.early_stopping in the
+        # workspace yaml).
+        es_cfg = cfg.training.get('early_stopping', None)
+        es_enabled = bool(es_cfg.enabled) if es_cfg is not None else False
+        es_mode = es_cfg.mode if es_enabled else 'min'
+        es_best = float('inf') if es_mode == 'min' else float('-inf')
+        es_stale = 0
+
         # training loop
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
@@ -361,7 +370,7 @@ class TrainDiffusionTransformerImageWorkspace(BaseWorkspace):
                     B, T, _ = pred_action.shape
                     pred_action = pred_action.view(B, T, -1)
                     gt_action = gt_action.view(B, T, -1)
-                    step_log[f'{category}_action_mse_error'] = torch.nn.functional.mse_loss(pred_action, gt_action)
+                    step_log[f'{category}_action_mse_error'] = torch.nn.functional.mse_loss(pred_action, gt_action).item()
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0 and accelerator.is_main_process:
                     with torch.no_grad():
@@ -421,6 +430,38 @@ class TrainDiffusionTransformerImageWorkspace(BaseWorkspace):
 
                     # recover the DDP model
                     self.model = model_ddp
+
+                    # early-stopping check: only fires on checkpoint events so a
+                    # break always happens immediately after latest.ckpt + topk are written.
+                    if es_enabled:
+                        v = step_log.get(es_cfg.monitor_key)
+                        if v is None:
+                            raise KeyError(
+                                f"early_stopping: monitor_key {es_cfg.monitor_key!r} missing from "
+                                f"step_log at epoch {self.epoch}. Ensure checkpoint_every is a "
+                                f"multiple of sample_every and val_ratio > 0."
+                            )
+                        improved = (
+                            (es_best - v) > es_cfg.min_delta if es_mode == 'min'
+                            else (v - es_best) > es_cfg.min_delta
+                        )
+                        if improved:
+                            es_best = v
+                            es_stale = 0
+                        else:
+                            es_stale += 1
+                        step_log['es_stale'] = es_stale
+                        step_log['es_best'] = es_best
+                        if es_stale >= es_cfg.patience:
+                            print(
+                                f"early stopping at epoch {self.epoch}: "
+                                f"no improvement on {es_cfg.monitor_key} for "
+                                f"{es_stale} checkpoint events "
+                                f"(best={es_best:.6g}, last={v:.6g})."
+                            )
+                            accelerator.log(step_log, step=self.global_step)
+                            json_logger.log(step_log)
+                            break
                 # ========= eval end for this epoch ==========
                 # end of epoch
                 # log of last step is combined with validation and rollout

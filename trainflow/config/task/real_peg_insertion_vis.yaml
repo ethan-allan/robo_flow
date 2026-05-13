@@ -2,6 +2,7 @@
 name: real_peg_insertion_vis
 
 image_shape: [3, 256, 256]
+image_resize_shape: null   # square source; no encoder-side resize
 dataset_path: data/peg_hole_tac
 
 shape_meta: &shape_meta

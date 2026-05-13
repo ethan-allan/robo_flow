@@ -18,7 +18,7 @@ BATCH_SIZE=64
 LR=1.0e-4
 
 # encoder
-RESIZE_SHAPE=null                      # null keeps native 256x256
+# resize_shape now comes from task yaml (image_resize_shape).
 SHARE_RGB_MODEL=False
 
 # diffusion
@@ -40,7 +40,6 @@ CUDA_VISIBLE_DEVICES=${GPU_ID} accelerate launch train.py \
     dataloader.batch_size=${BATCH_SIZE} \
     val_dataloader.batch_size=${BATCH_SIZE} \
     optimizer.lr=${LR} \
-    policy.obs_encoder.resize_shape=${RESIZE_SHAPE} \
     policy.obs_encoder.share_rgb_model=${SHARE_RGB_MODEL} \
     policy.noise_scheduler.prediction_type=${PREDICTION_TYPE} \
     checkpoint.topk.k=${TOPK_K} \

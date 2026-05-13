@@ -241,6 +241,15 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
+        # early-stopping state. monitor_key must land in step_log at every
+        # checkpoint event (see comment on cfg.training.early_stopping in the
+        # workspace yaml).
+        es_cfg = cfg.training.get('early_stopping', None)
+        es_enabled = bool(es_cfg.enabled) if es_cfg is not None else False
+        es_mode = es_cfg.mode if es_enabled else 'min'
+        es_best = float('inf') if es_mode == 'min' else float('-inf')
+        es_stale = 0
+
         # training loop
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
@@ -358,6 +367,38 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
                         del result
                         del pred_action
                         del mse
+
+                    # also log action-space MSE on a val batch — this is the
+                    # checkpoint top-k monitor and the early-stopping signal.
+                    if cfg.task.dataset.val_ratio > 0 and len(val_dataloader) > 0:
+                        with torch.no_grad():
+                            val_sampling_batch = next(iter(val_dataloader))
+                            batch = dict_apply(val_sampling_batch, lambda x: x.to(device, non_blocking=True))
+                            obs_dict = batch['obs']
+                            extended_obs_dict = batch['extended_obs']
+                            gt_action = batch['action']
+
+                            if 'latent' in cfg.name:
+                                dataset_obs_temporal_downsample_ratio = cfg.task.dataset.obs_temporal_downsample_ratio
+                                result = policy.predict_action(obs_dict,
+                                                               extended_obs_dict=extended_obs_dict,
+                                                               dataset_obs_temporal_downsample_ratio=dataset_obs_temporal_downsample_ratio)
+                            else:
+                                result = policy.predict_action(obs_dict)
+                            pred_action = result['action_pred']
+
+                            all_preds, all_gt = accelerator.gather_for_metrics((pred_action, gt_action))
+                            if pred_action.shape[-1] in [12, 13, 19]:
+                                # ignore virtual target and stiffness
+                                all_preds = all_preds[..., :6]
+                                all_gt = all_gt[..., :6]
+
+                            step_log['val_action_mse_error'] = torch.nn.functional.mse_loss(all_preds, all_gt).item()
+                            del batch
+                            del obs_dict
+                            del gt_action
+                            del result
+                            del pred_action
                 accelerator.wait_for_everyone()
                 
                 # checkpoint
@@ -388,7 +429,40 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
 
                     # recover the DDP model
                     self.model = model_ddp
-                    
+
+                    # early-stopping check: only fires on checkpoint events so a
+                    # break always happens immediately after latest.ckpt + topk are written.
+                    if es_enabled:
+                        v = step_log.get(es_cfg.monitor_key)
+                        if v is None:
+                            raise KeyError(
+                                f"early_stopping: monitor_key {es_cfg.monitor_key!r} missing from "
+                                f"step_log at epoch {self.epoch}. Ensure checkpoint_every is a "
+                                f"multiple of sample_every and val_ratio > 0."
+                            )
+                        improved = (
+                            (es_best - v) > es_cfg.min_delta if es_mode == 'min'
+                            else (v - es_best) > es_cfg.min_delta
+                        )
+                        if improved:
+                            es_best = v
+                            es_stale = 0
+                        else:
+                            es_stale += 1
+                        step_log['es_stale'] = es_stale
+                        step_log['es_best'] = es_best
+                        if es_stale >= es_cfg.patience:
+                            print(
+                                f"early stopping at epoch {self.epoch}: "
+                                f"no improvement on {es_cfg.monitor_key} for "
+                                f"{es_stale} checkpoint events "
+                                f"(best={es_best:.6g}, last={v:.6g})."
+                            )
+                            policy.train()
+                            accelerator.log(step_log, step=self.global_step)
+                            json_logger.log(step_log)
+                            break
+
                 # ========= eval end for this epoch ==========
                 policy.train()
 
