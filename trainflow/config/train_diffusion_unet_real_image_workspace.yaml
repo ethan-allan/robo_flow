@@ -222,7 +222,7 @@ training:
     enabled: false
     monitor_key: val_action_mse_error
     mode: min
-    patience: 10
+    patience: 50
     min_delta: 1.0e-4
 
 logging:

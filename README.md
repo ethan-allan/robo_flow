@@ -505,34 +505,7 @@ preprocess:
 ```
 Then `zarr_writer.build_from_cfg` just loops `hydra.utils.instantiate(spec)` over `task_cfg.preprocess`. Each preprocessor must be idempotent (writes `<name>.npy` per episode, overwrites OK). Once this lands, the VRR-specific branches in `resolve_source_aliases` / `resolve_pose_keys` can also go — `shape_meta.action.type: 6DOF_vrr` stays as a human-readable label but no longer gates code.
 
-### e. No val-side action-MSE for top-k checkpoint selection
-`checkpoint.topk.monitor_key` defaults to `train_loss` (ε-MSE on noise prediction, train batches). Switching to `val_loss` is a one-line yaml change and catches overfit, but both metrics are still ε-MSE — dominated by easy high-noise timesteps and only loosely correlated with closed-loop action quality. `train_action_mse_error` is action-space (xyz+rpy MSE) but only on a training batch, so it doesn't catch overfit.
-
-**Fix:** add `val_action_mse_error` alongside `train_action_mse_error` in `workspace/train_diffusion_unet_image_workspace.py`. Mirror the existing sample block at ~`:330-359`:
-```python
-# after the val_loss block, still inside `if (self.epoch % cfg.training.sample_every) == 0:`
-with torch.no_grad():
-    val_batch = dict_apply(val_sampling_batch, lambda x: x.to(device, non_blocking=True))
-    result = policy.predict_action(val_batch['obs'])
-    pred_action = result['action_pred']
-    all_preds, all_gt = accelerator.gather_for_metrics((pred_action, val_batch['action']))
-    if pred_action.shape[-1] in [12, 13, 19]:
-        all_preds = all_preds[..., :6]
-        all_gt = all_gt[..., :6]
-    step_log['val_action_mse_error'] = torch.nn.functional.mse_loss(all_preds, all_gt).item()
-```
-You'll need to capture `val_sampling_batch` from the val loader the same way `train_sampling_batch` is captured (one batch per epoch, kept around for the sample step). Then point `checkpoint.topk` at it:
-```yaml
-checkpoint:
-  topk:
-    monitor_key: val_action_mse_error
-    mode: min
-    k: 5
-    format_str: 'epoch={epoch:04d}-val_action_mse={val_action_mse_error:.4f}.ckpt'
-```
-Make sure `checkpoint_every` stays a multiple of `sample_every` — `val_action_mse_error` is only in `step_log` on sample epochs, and `TopKCheckpointManager.get_ckpt_path` will `KeyError` if the key is missing (`common/checkpoint_util.py:26`).
-
-### f. Other smaller items
+### e. Other smaller items
 - `peg_insertion_vrr_5fps.yaml` declares both `shape_meta` (19-D action, what's stored in zarr) and `model_shape_meta` (13-D, post-`rpy_for_rotation`). Express the collapse as one attribute (`action: { storage_shape: [19], model_shape: [13], collapse: rot6d_to_rpy }`) and halve the cfg.
 - `pad_before` / `pad_after` `${eval:...}` expressions, `seed: 42`, `val_ratio: 0.1`, `delta_action: False`, and the dataset `_target_` are duplicated across every task yaml. These are paradigm-level defaults that belong in the workspace yaml (or a shared default fragment).
 - `pose7_to_pose9` / `axis_angle_to_rot6d` live in both `prepare_vrr.py` and `zarr_writer.py`. Pick one home (likely `space_utils.py`).

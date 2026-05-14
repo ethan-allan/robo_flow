@@ -110,7 +110,7 @@ policy:
   input_pertub: 0.1 # reference: https://github.com/forever208/DDPM-IP
   # The high-freq RNN branch (force/wrench at sensor rate) was stripped from
   # this fork. Keep False unless you re-add trainflow/model/force/rnn.py.
-  use_rnn_obs_encoder: False
+  use_rnn_obs_encoder: True
   rnn_obs_encoder_n_layer: 1
   rnn_obs_encoder_hidden_dim: 512
   
@@ -181,10 +181,10 @@ training:
   # monitor_key must be present in step_log at every checkpoint event:
   # val_action_mse_error requires sample_every | checkpoint_every and val_ratio>0.
   early_stopping:
-    enabled: false
+    enabled: True
     monitor_key: val_action_mse_error
     mode: min
-    patience: 10
+    patience: 50
     min_delta: 1.0e-4
 
 logging:

@@ -23,10 +23,10 @@ import numpy as np
 import zarr
 from numcodecs import Blosc
 from omegaconf import OmegaConf
-from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 from trainflow.common.replay_buffer import ReplayBuffer
+from trainflow.common.obs_processing import bgr_to_rgb, pose7_to_pose9
 
 
 # Builtin default: cfg key -> source filename when the two differ.
@@ -84,19 +84,6 @@ def resolve_pose_keys(task_cfg) -> set[str]:
     return defaults
 
 
-def axis_angle_to_rot6d(axis_angle: np.ndarray) -> np.ndarray:
-    R = Rotation.from_rotvec(axis_angle.reshape(-1, 3)).as_matrix()
-    rot6d = np.concatenate([R[:, :, 0], R[:, :, 1]], axis=-1)
-    return rot6d.reshape(*axis_angle.shape[:-1], 6)
-
-
-def pose7_to_pose9(arr: np.ndarray) -> np.ndarray:
-    assert arr.ndim == 2 and arr.shape[1] == 7, f"expected (T, 7), got {arr.shape}"
-    xyz = arr[:, 0:3]
-    rot6d = axis_angle_to_rot6d(arr[:, 3:6])
-    return np.concatenate([xyz, rot6d], axis=1).astype(np.float32)
-
-
 def collect_keys(task_cfg) -> list[tuple[str, str]]:
     """Return [(key, type), ...] from shape_meta.obs, extended_obs, action."""
     sm = task_cfg.shape_meta
@@ -139,8 +126,7 @@ def load_key(ep_dir: Path, key: str, type_: str,
                 f"{ep_dir.name}/{fname}: rgb expected (T,H,W,3) uint8, "
                 f"got {arr.shape} {arr.dtype}"
             )
-        arr = arr[..., ::-1]  # BGR -> RGB
-        return arr
+        return bgr_to_rgb(arr)
     if key in pose_keys:
         return pose7_to_pose9(arr)            # already float32
     return arr.astype(np.float32, copy=False)  # low_dim passthrough: enforce float32
@@ -293,7 +279,7 @@ def write_yaml(path, task_name, stamp, args, key_specs, rb, cprs, aliases, pose_
         steps = []
         if t == "rgb":
             steps.append("BGR -> RGB channel swap")
-        if k in pose_keys:
+        if k in pose_keys:  
             steps.append("axis-angle (T,7) -> rot6d (T,9) float32 (gripper dropped)")
         cpr = cprs.get(k) if cprs else None
         arrays[k] = {

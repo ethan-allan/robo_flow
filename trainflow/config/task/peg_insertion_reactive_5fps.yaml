@@ -1,0 +1,94 @@
+# Reactive (HF-RNN) variant of peg_insertion_vrr_5fps. Mirrors that
+# config exactly except `eef_force` is also declared under
+# `extended_obs`:
+#   - obs.eef_force: sliced to n_obs_steps, fed to the slow
+#     TransformerObsEncoder alongside rgb/eef_state.
+#   - extended_obs.eef_force: full horizon window of the SAME zarr
+#     array, fed to the GRU (policy.use_rnn_obs_encoder=True) and
+#     surfaced to the diffusion transformer as per-step temporal_cond
+#     tokens.
+# The zarr writer dedups the shared key so only one eef_force array is
+# stored; the dataset's __getitem__ returns both views from that single
+# read (real_image_tactile_dataset.py: __init__ excludes extended_obs
+# keys from key_first_k, so the sampler returns the full horizon).
+#
+# Action remains 19-D VRR (xyz + rot6d + virtual_xyz + virtual_rot6d +
+# stiffness), collapsed to 13-D in model_shape_meta via rpy_for_rotation.
+# Reactivity is added through wrench conditioning, on top of (not
+# instead of) the VRR action.
+#
+# Zarr layout produced by trainflow.common.zarr_writer (identical to
+# peg_insertion_vrr_5fps — extended_obs adds no new arrays):
+#
+#   data/replay_buffers/peg_insertion_reactive_5fps/replay_buffer.zarr/
+#     data/
+#       rgb            (T_total, H, W, 3)  uint8
+#       eef_state      (T_total, 9)        float32  # pose7 -> ortho6d
+#       eef_force      (T_total, 6)        float32  # passthrough
+#       action         (T_total, 19)       float32  # from vrr_action.npy
+#     meta/
+#       episode_ends   (n_eps,)            int64
+
+name: peg_insertion_reactive_5fps
+
+image_shape: [3, 256, 256]
+image_resize_shape: null
+raw_episodes: trainflow/dataset/peg_hole_tac
+# Reuses the existing peg_insertion_vrr_5fps zarr — extended_obs adds no
+# new arrays so no rebuild is needed. Repoint if you bundle a fresh one.
+dataset_path: data/replay_buffers/peg_insertion_vrr_5fps
+
+shape_meta:
+  obs:
+    rgb:
+      shape: ${task.image_shape}
+      type: rgb
+    eef_state:
+      shape: [9]
+      type: low_dim
+    eef_force:
+      shape: [6]
+      type: low_dim
+  extended_obs:
+    eef_force:
+      shape: [6]
+      type: low_dim
+  action:
+    shape: [19] # (3+6 + 3+6 + 1) (x, y, z, 6d rotation, virtual_x, virtual_y, virtual_z, virtual_6d rotation, stiffness)
+    type: 6DOF_vrr
+
+model_shape_meta:
+  obs:
+    rgb:
+      shape: ${task.image_shape}
+      type: rgb
+    eef_state:
+      shape: [9]
+      type: low_dim
+    eef_force:
+      shape: [6]
+      type: low_dim
+  extended_obs:
+    eef_force:
+      shape: [6]
+      type: low_dim
+  action:
+    shape: [13] # (3+3 + 3+3 + 1) collapsed from 19D ortho6d via rpy_for_rotation
+    type: 6DOF_vrr
+
+dataset:
+  _target_: trainflow.dataset.real_image_tactile_dataset.RealImageTactileDataset
+  shape_meta: ${task.shape_meta}
+  dataset_path: ${task.dataset_path}
+  horizon: ${horizon}
+  pad_before: ${eval:'${dataset_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  obs_temporal_downsample_ratio: 1
+  n_latency_steps: ${n_latency_steps}
+  seed: 42
+  val_ratio: 0.1
+  max_train_episodes: null
+  delta_action: False
+  relative_action: False
+  rpy_for_rotation: True

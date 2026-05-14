@@ -1,0 +1,94 @@
+# Reactive (HF-RNN) wrench task template. Mirrors the upstream
+# real_flip_image_wrench_implicitrdp_10fps.yaml shape_meta:
+#   - `obs.right_robot_tcp_wrench` feeds the slow vision/low-dim path
+#     (sliced to n_obs_steps inside the dataset).
+#   - `extended_obs.right_robot_tcp_wrench` is the SAME zarr array, but
+#     the sampler returns the full horizon window for it. That window is
+#     consumed by the GRU in DiffusionTransformerImagePolicy
+#     (use_rnn_obs_encoder=True) and emitted as per-step temporal_cond
+#     tokens fed to the transformer.
+#
+# Zarr layout produced by trainflow.common.zarr_writer for this task
+# (one row per visual / control-loop frame at the recording rate; T_total
+# is summed across episodes):
+#
+#   data/<dataset_path>/replay_buffer.zarr/
+#     data/
+#       right_wrist_img            (T_total, H, W, 3)  uint8
+#       right_robot_tcp_pose       (T_total, 9)        float32  # pose7 -> ortho6d
+#       right_robot_tcp_wrench     (T_total, 6)        float32  # passthrough
+#       action                     (T_total, 19)       float32  # vrr_action.npy
+#     meta/
+#       episode_ends               (n_eps,)            int64
+#
+# Per-episode source files expected under raw_episodes/<ep>/ :
+#   right_wrist_img.npy             (T, H, W, 3) uint8 BGR
+#   right_robot_tcp_pose.npy        (T, 7)       axis-angle pose (writer 7->9)
+#   right_robot_tcp_wrench.npy      (T, 6)       F/T
+#   eef_state.npy + eef_force.npy   (T, 7) and (T, 6)  consumed by prepare_vrr
+#                                                      to produce vrr_action.npy
+
+name: real_flip_image_wrench_implicitrdp_10fps
+
+image_shape: [3, 360, 640]
+image_resize_shape: [180, 320]
+dataset_path: data/flip_v1_zarr
+
+shape_meta: &shape_meta
+  obs:
+    right_wrist_img:
+      shape: ${task.image_shape}
+      type: rgb
+    right_robot_tcp_pose:
+      shape: [9]
+      type: low_dim
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  # Same wrench key, but the dataset returns the full horizon (no
+  # key_first_k slicing) for any key listed under extended_obs.
+  extended_obs:
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  action:
+    # (3+6 + 3+6 + 1) = tcp_xyz, tcp_rot6d, virtual_xyz, virtual_rot6d, stiffness
+    shape: [19]
+    type: 6DOF_vrr
+
+# Post-rpy-collapse shapes consumed by the policy / obs encoder.
+# shape_meta above stays in the raw zarr layout for the dataset to read.
+model_shape_meta:
+  obs:
+    right_wrist_img:
+      shape: ${task.image_shape}
+      type: rgb
+    right_robot_tcp_pose:
+      shape: [6]   # xyz + rpy
+      type: low_dim
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  extended_obs:
+    right_robot_tcp_wrench:
+      shape: [6]
+      type: low_dim
+  action:
+    shape: [13]    # xyz + rpy + virtual_xyz + virtual_rpy + stiffness
+
+dataset:
+  _target_: trainflow.dataset.real_image_tactile_dataset.RealImageTactileDataset
+  shape_meta: *shape_meta
+  dataset_path: ${task.dataset_path}
+  horizon: ${horizon}
+  pad_before: ${eval:'${dataset_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  obs_temporal_downsample_ratio: 1
+  n_latency_steps: ${n_latency_steps}
+  seed: 42
+  val_ratio: 0.1
+  max_train_episodes: null
+  delta_action: False
+  relative_action: True
+  rpy_for_rotation: True

@@ -39,8 +39,6 @@ model_shape_meta:
     shape: [13] # (3+3 + 3+3 + 1) (x, y, z, r, p, y, virtual_x, virtual_y, virtual_z, virtual_r, virtual_p, virtual_y, stiffness) — collapsed from 19D ortho6d via rpy_for_rotation
     type: 6DOF_vrr
 
-
-
 dataset:
   _target_: trainflow.dataset.real_image_tactile_dataset.RealImageTactileDataset
   shape_meta: ${task.shape_meta}

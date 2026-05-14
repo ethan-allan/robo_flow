@@ -15,6 +15,7 @@ from trainflow.model.vision.transformer_obs_encoder import TransformerObsEncoder
 from trainflow.model.vision.multi_image_obs_encoder import MultiImageObsEncoder
 from trainflow.model.diffusion.transformer_for_diffusion import TransformerForDiffusion
 from trainflow.model.vision.timm_obs_encoder import TimmObsEncoder
+from trainflow.model.force.rnn import RNN
 
 from loguru import logger
 
@@ -54,12 +55,20 @@ class DiffusionTransformerImagePolicy(BaseImagePolicy):
 
         all_extented_obs_keys = list(shape_meta['extended_obs'].keys()) if 'extended_obs' in shape_meta else []
         self.extented_obs_keys = sorted(all_extented_obs_keys)
+        temporal_cond_dim = sum(
+            shape_meta['extended_obs'][k]['shape'][-1] for k in self.extented_obs_keys
+        )
         if use_rnn_obs_encoder:
-            raise NotImplementedError(
-                "RNN obs encoder (force/wrench branch) was stripped. "
-                "Set use_rnn_obs_encoder=False or re-add trainflow/model/force/rnn.py."
+            assert len(self.extented_obs_keys) > 0, \
+                "extended_obs is required for RNNObsEncoder"
+            self.rnn_obs_encoder = RNN(
+                input_dim=temporal_cond_dim,
+                hidden_dim=rnn_obs_encoder_hidden_dim,
+                layer_num=rnn_obs_encoder_n_layer,
+                n_emb=n_emb,
             )
-        self.rnn_obs_encoder = None
+        else:
+            self.rnn_obs_encoder = None
 
         self.shape_meta = shape_meta
         self.obs_encoder = obs_encoder

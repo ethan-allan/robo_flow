@@ -29,10 +29,15 @@ from pathlib import Path
 
 import numpy as np
 from omegaconf import OmegaConf
-from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
-from trainflow.common.space_utils import pose_3d_9d_to_homo_matrix_batch
+from trainflow.common.obs_processing import (
+    compute_global_offset,
+    compute_stiffness,
+    moving_average_1d,
+    pose7_to_pose9,
+    tare_force,
+)
 
 
 DEFAULT_VRR_PARAMS = {
@@ -43,52 +48,6 @@ DEFAULT_VRR_PARAMS = {
     "wrench_average_window": 1,
     "tare_frames": 5,
 }
-
-
-def axis_angle_to_rot6d(axis_angle: np.ndarray) -> np.ndarray:
-    R = Rotation.from_rotvec(axis_angle.reshape(-1, 3)).as_matrix()
-    rot6d = np.concatenate([R[:, :, 0], R[:, :, 1]], axis=-1)
-    return rot6d.reshape(*axis_angle.shape[:-1], 6)
-
-
-def pose7_to_pose9(arr: np.ndarray) -> np.ndarray:
-    assert arr.ndim == 2 and arr.shape[1] == 7, f"expected (T, 7), got {arr.shape}"
-    xyz = arr[:, 0:3]
-    rot6d = axis_angle_to_rot6d(arr[:, 3:6])
-    return np.concatenate([xyz, rot6d], axis=1).astype(np.float32)
-
-
-def moving_average_1d(data: np.ndarray, window: int) -> np.ndarray:
-    if window <= 1:
-        return data.copy()
-    kernel = np.ones(window) / window
-    out = np.empty_like(data)
-    for d in range(data.shape[1]):
-        out[:, d] = np.convolve(data[:, d], kernel, mode="same")
-    return out
-
-
-def compute_stiffness(wrench_xyz: np.ndarray, k_max: float, k_min: float,
-                      f_low: float, f_high: float) -> np.ndarray:
-    mag = np.linalg.norm(wrench_xyz, axis=-1)
-    interp = k_max - (k_max - k_min) * (mag - f_low) / (f_high - f_low)
-    k = np.where(mag < f_low, k_max,
-                 np.where(mag > f_high, k_min, interp))
-    return k[:, None].astype(np.float32)
-
-
-def compute_global_offset(local_offset: np.ndarray, tcp_pose_9d: np.ndarray) -> np.ndarray:
-    H = pose_3d_9d_to_homo_matrix_batch(tcp_pose_9d.astype(np.float32))
-    R = H[:, :3, :3]
-    return np.einsum("tij,tj->ti", R, local_offset)
-
-
-def tare_force(force: np.ndarray, n_frames: int) -> tuple[np.ndarray, np.ndarray]:
-    if n_frames <= 0:
-        return force.copy(), np.zeros(force.shape[1], dtype=force.dtype)
-    n = min(n_frames, len(force))
-    baseline = force[:n].mean(axis=0)
-    return force - baseline, baseline
 
 
 def build_vrr_action(eef_state_7d: np.ndarray,
