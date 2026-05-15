@@ -1,15 +1,19 @@
 # Task identity + dataset paths + composed deploy stack.
 #
-# Sensor pipelines and the action mode are composed from
-# `config/sensor_pipelines/` and `config/action_modes/`. To swap a
-# sensor/mode, edit those — not this file.
+# Sensor cfgs (connection + post-proc) come from
+# `config/hardware/sensor_cfgs/` (cameras + tactile) and
+# `config/hardware/ur3/sensor_cfgs/` (robot-as-obs). The env_cfg
+# carries connection details + per-deploy state (applied_at_capture,
+# control_fps, tactile mode). The action mode comes from
+# `config/hardware/ur3/action_modes/`. Swap a sensor/mode by editing
+# those files — not this one.
 defaults:
   - _task_base
-  - /hardware: ur3_bir_default
-  - /hardware/sensor_pipelines@shape_meta.obs.rgb:        platform_realsense_rgb
-  - /hardware/sensor_pipelines@shape_meta.obs.eef_state:  ur3_eef_state
-  - /hardware/sensor_pipelines@shape_meta.obs.eef_force:  ur3_eef_force
-  - /hardware/ur3/action_modes@shape_meta.action:         vrr_19d
+  - /hardware/env_cfgs@hardware:                              ur3_bir_default
+  - /hardware/sensor_cfgs@shape_meta.obs.rgb:                 platform_realsense_rgb
+  - /hardware/ur3/sensor_cfgs@shape_meta.obs.eef_state:       ur3_eef_state
+  - /hardware/ur3/sensor_cfgs@shape_meta.obs.eef_force:       ur3_eef_force
+  - /hardware/ur3/action_modes@shape_meta.action:             vrr_19d
   - _self_
 
 name: peg_insertion_vrr_5fps

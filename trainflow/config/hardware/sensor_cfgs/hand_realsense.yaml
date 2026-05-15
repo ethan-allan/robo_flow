@@ -1,0 +1,18 @@
+# Hand RealSense — wrist-mounted RGB stream.
+#
+# Same self-contained schema as `platform_realsense_rgb.yaml`. Lab
+# default mounts a D405 here; populate the serial per-rig.
+
+client:
+  kind: realsense
+  serial: 315122271740                           # set per-rig in the env_cfg
+  width: 640
+  height: 480
+  fps: 15
+
+shape: [3, 256, 256]
+type: rgb
+from: cameras.hand_realsense.rgb
+ops:
+  - {name: resize, size: [256, 256]}
+ 

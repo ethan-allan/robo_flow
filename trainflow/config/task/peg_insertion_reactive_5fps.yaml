@@ -19,11 +19,11 @@
 #       episode_ends   (n_eps,)            int64
 defaults:
   - _task_base
-  - /hardware: ur3_bir_default
-  - /hardware/sensor_pipelines@shape_meta.obs.rgb:        platform_realsense_rgb
-  - /hardware/sensor_pipelines@shape_meta.obs.eef_state:  ur3_eef_state
-  - /hardware/sensor_pipelines@shape_meta.obs.eef_force:  ur3_eef_force
-  - /hardware/ur3/action_modes@shape_meta.action:         vrr_19d
+  - /hardware/env_cfgs@hardware:                              ur3_bir_default
+  - /hardware/sensor_cfgs@shape_meta.obs.rgb:                 platform_realsense_rgb
+  - /hardware/ur3/sensor_cfgs@shape_meta.obs.eef_state:       ur3_eef_state
+  - /hardware/ur3/sensor_cfgs@shape_meta.obs.eef_force:       ur3_eef_force
+  - /hardware/ur3/action_modes@shape_meta.action:             vrr_19d
   - _self_
 
 name: peg_insertion_reactive_5fps

@@ -1,16 +1,16 @@
 # Task identity + dataset path + composed deploy stack.
 #
-# Sensor pipelines (per model input) and the action mode are composed
-# from `config/sensor_pipelines/` and `config/action_modes/` so this
-# yaml stays small. To swap the camera, the action mode, or to add a
-# new input, edit the corresponding cfg under those directories — no
-# change here required.
+# Sensor cfgs (connection + post-proc) come from
+# `config/hardware/sensor_cfgs/` (cameras + tactile) and
+# `config/hardware/ur3/sensor_cfgs/` (robot-as-obs). The env_cfg
+# carries connection details + per-deploy state. Swap a sensor/mode
+# by editing those — not this file.
 defaults:
   - _task_base
-  - /hardware: ur3_bir_default
-  - /hardware/sensor_pipelines@shape_meta.obs.rgb:        platform_realsense_rgb
-  - /hardware/sensor_pipelines@shape_meta.obs.eef_state:  ur3_eef_state
-  - /hardware/ur3/action_modes@shape_meta.action:         tcp_absolute_9d
+  - /hardware/env_cfgs@hardware:                              ur3_bir_default
+  - /hardware/sensor_cfgs@shape_meta.obs.rgb:                 platform_realsense_rgb
+  - /hardware/ur3/sensor_cfgs@shape_meta.obs.eef_state:       ur3_eef_state
+  - /hardware/ur3/action_modes@shape_meta.action:             tcp_absolute_9d
   - _self_
 
 name: real_ee2_dice

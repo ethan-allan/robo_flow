@@ -8,6 +8,7 @@
 #   defaults:
 #     - /action_modes@shape_meta.action: tcp_absolute_9d
 shape: [9]
+type: pose9
 out:
   tcp_target:
     slice: [0, 9]

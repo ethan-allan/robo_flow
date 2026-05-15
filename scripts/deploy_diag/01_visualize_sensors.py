@@ -1,15 +1,22 @@
-"""Phase B — sensors-only live visualisation.
+"""Stage S3 / Phase B — sensors-only live mosaic.
 
-Open every camera + gelsight named in the hardware cfg, render a 2x2
-OpenCV mosaic for `--duration` seconds, and print per-stream fps + a
-histogram of frame intervals at the end. The robot stays powered OFF.
+Opens every discovered RealSense + GelSight at sensible defaults
+(no cfg required), renders a mosaic for `--duration` seconds, prints
+per-stream fps + a histogram of frame intervals at the end. The robot
+stays powered OFF — this script never talks to the controller.
+
+Discovery-driven: there's no per-camera "role" name (platform/hand)
+here because no task is loaded; tiles are labelled by device serial /
+slot. To check that the role-vs-serial mapping in your task matches
+the rig, use `00_inventory.py --task <name>` first.
 
 Usage:
-    python -m scripts.deploy_diag.01_visualize_sensors \\
-        --hw trainflow/config/hardware/ur3_bir_default.yaml \\
-        --duration 30
+    python -m scripts.deploy_diag.01_visualize_sensors --duration 30
 
-Go/no-go criteria are listed in scripts/deploy_diag/README.md (Phase B).
+    # Cap RealSense fps if your USB bus can't sustain the full set:
+    python -m scripts.deploy_diag.01_visualize_sensors --rs-fps 10 --duration 30
+
+Go/no-go criteria are listed in scripts/deploy_diag/SENSOR_DEBUG_PLAN.md.
 """
 from __future__ import annotations
 
@@ -31,45 +38,44 @@ from trainflow.env.ur3_bir.discover import (
 from trainflow.env.ur3_bir.sensor_clients import GelsightClient, RealsenseClient
 
 
-def _build_camera_clients(hw_cfg) -> dict:
-    """Build a RealsenseClient per enabled camera plus a GelsightClient
-    per discovered gelsight slot. Errors are logged but never raised
-    (one missing camera shouldn't block the rest of the mosaic)."""
+def _build_clients(rs_width: int, rs_height: int, rs_fps: int,
+                   gs_width: int, gs_height: int, gs_fps: int) -> dict:
+    """Open every discovered RealSense + GelSight at the given defaults.
+    Returns {label: client}. Errors are recorded as `producer_errors`
+    on each client but never raised — one missing device shouldn't
+    block the rest of the mosaic."""
     clients: dict[str, object] = {}
 
-    discovered_rs = {c["serial"]: c["name"] for c in detect_realsense_cameras()}
-    print(f"[realsense] discovered {len(discovered_rs)} device(s):")
-    for serial, name in discovered_rs.items():
-        print(f"  {serial}  {name}")
-
-    cams = hw_cfg.get("cameras", {}) or {}
-    for cam_name, cam_cfg in cams.items():
-        if not cam_cfg.get("enabled", False):
-            continue
-        cfg_serial = cam_cfg.get("serial", None)
-        match = (cfg_serial in discovered_rs) if cfg_serial else None
-        print(f"[realsense] cfg.{cam_name}.serial={cfg_serial!r} "
-              f"{'OK' if match else 'MISSING' if cfg_serial else 'unset'}")
-        if not cfg_serial:
-            print(f"  ... skip {cam_name}; populate cfg.cameras.{cam_name}.serial first")
-            continue
+    rs_devices = detect_realsense_cameras()
+    print(f"[realsense] discovered {len(rs_devices)} device(s):")
+    for c in rs_devices:
+        print(f"  serial={c['serial']}  name={c['name']}")
+        cfg = OmegaConf.create({
+            "serial": c["serial"],
+            "width": rs_width, "height": rs_height, "fps": rs_fps,
+        })
+        cli = RealsenseClient(cfg)
         try:
-            cli = RealsenseClient(cam_cfg)
             cli.start()
-            clients[f"cam.{cam_name}"] = cli
+            clients[f"rs.{c['serial']}"] = cli
         except Exception as e:
-            print(f"  ... FAILED to start {cam_name}: {e}")
+            print(f"  ... FAILED to start serial={c['serial']}: {e}")
 
     gs_paths = discover_gelsight_devices()
-    print(f"[gelsight] discovered {len(gs_paths)} sensor(s):")
-    for p in gs_paths:
-        print(f"  slot=? serial={gelsight_serial_from_path(p)!r}  {p}")
-    gs_cfg = hw_cfg.get("tactile", {}).get("gelsight", {})
-    for slot in range(len(gs_paths)):
+    print(f"[gelsight] discovered {len(gs_paths)} device(s):")
+    for slot, p in enumerate(gs_paths):
+        print(f"  slot {slot}  serial={gelsight_serial_from_path(p)}  {p}")
+        cfg = OmegaConf.create({
+            "paths": list(gs_paths),
+            "record_size": [gs_width, gs_height],
+            "fps": gs_fps,
+            "fourcc": "MJPG",
+            "warmup_frames": 30,
+        })
         try:
-            cli = GelsightClient(gs_cfg, slot=slot)
+            cli = GelsightClient(cfg, slot=slot)
             cli.start()
-            clients[f"gelsight.{slot}"] = cli
+            clients[f"gs.{slot}"] = cli
         except Exception as e:
             print(f"  ... FAILED to start gelsight slot={slot}: {e}")
 
@@ -79,13 +85,13 @@ def _build_camera_clients(hw_cfg) -> dict:
 def _stop_all(clients: dict) -> None:
     for name, cli in clients.items():
         try:
-            cli.stop()
+            cli.stop()  # type: ignore[attr-defined]
         except Exception as e:
             print(f"  ... stop {name} failed: {e}")
 
 
 def _mosaic(frames: dict[str, np.ndarray | None], tile=(320, 240)) -> np.ndarray:
-    """Compose a 2-col mosaic. Missing slots get a 'no signal' gray tile."""
+    """Compose a 2-col mosaic. Missing slots get a 'no signal' grey tile."""
     w, h = tile
     tiles = []
     for name in sorted(frames):
@@ -111,24 +117,25 @@ def _mosaic(frames: dict[str, np.ndarray | None], tile=(320, 240)) -> np.ndarray
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--hw", type=Path, default=Path(
-        "trainflow/config/hardware/ur3_bir_default.yaml"))
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--duration", type=float, default=30.0)
+    ap.add_argument("--rs-width", type=int, default=640)
+    ap.add_argument("--rs-height", type=int, default=480)
+    ap.add_argument("--rs-fps", type=int, default=15)
+    ap.add_argument("--gs-width", type=int, default=320)
+    ap.add_argument("--gs-height", type=int, default=240)
+    ap.add_argument("--gs-fps", type=int, default=25)
     ap.add_argument("--no-display", action="store_true")
     args = ap.parse_args()
 
-    if not args.hw.exists():
-        print(f"[fatal] hw cfg not found: {args.hw}", file=sys.stderr)
-        return 2
-    hw_cfg = OmegaConf.load(str(args.hw))
-
-    clients = _build_camera_clients(hw_cfg)
+    clients = _build_clients(
+        args.rs_width, args.rs_height, args.rs_fps,
+        args.gs_width, args.gs_height, args.gs_fps,
+    )
     if not clients:
         print("[fatal] no sensor clients started; aborting.", file=sys.stderr)
         return 2
 
-    # Per-stream stats: last_ts, interval samples, frame count.
     last_ts: dict[str, float] = {}
     intervals: dict[str, collections.deque] = {
         name: collections.deque(maxlen=1024) for name in clients
@@ -142,7 +149,7 @@ def main() -> int:
             frames: dict[str, np.ndarray | None] = {}
             for name, cli in clients.items():
                 try:
-                    out = cli.get_latest()
+                    out = cli.get_latest()  # type: ignore[attr-defined]
                 except Exception:
                     out = None
                 if out is None:
@@ -184,7 +191,7 @@ def main() -> int:
         fps = count / elapsed
         ivs = np.array(intervals[name]) if intervals[name] else np.array([0.0])
         print(
-            f"  {name:20s}  frames={count:5d}  fps={fps:6.2f}  "
+            f"  {name:24s}  frames={count:5d}  fps={fps:6.2f}  "
             f"interval mean={ivs.mean()*1000:6.1f}ms  "
             f"p99={np.percentile(ivs, 99)*1000:6.1f}ms  "
             f"max={ivs.max()*1000:6.1f}ms"

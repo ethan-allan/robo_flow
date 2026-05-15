@@ -8,17 +8,9 @@
 #   defaults:
 #     - /action_modes@shape_meta.action: vrr_19d
 shape: [19]
-type: 6DOF_vrr
+type: pose9_vrr
 out:
   tcp_target:
     slice: [0, 9]                          # xyz + ortho6d
     to: robot.ur3.tcp_command
     ops: [{name: pose9_to_pose6}]
-  virtual_target:
-    slice: [9, 18]                         # virtual_xyz + virtual_ortho6d
-    to: robot.ur3.virtual_target
-    ops: [{name: pose9_to_pose6}]
-  stiffness:
-    slice: [18, 19]
-    to: robot.ur3.stiffness
-    ops: []

@@ -1,4 +1,14 @@
-import torch
+from __future__ import annotations
+
+try:
+    import torch
+except ImportError:
+    # torch is only needed by the _torch-suffixed functions below.
+    # Letting this module import without torch keeps the deploy stack
+    # (which only consumes numpy versions) usable on hosts without
+    # the ML deps installed.
+    torch = None  # type: ignore[assignment]
+
 import numpy as np
 from typing import Tuple, Union
 import transforms3d as t3d

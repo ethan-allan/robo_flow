@@ -1,0 +1,30 @@
+# UR3 base cfg: connection + actuator config for the controller.
+#
+# Composed once per env_cfg (typically at `clients.robot.ur3`) and
+# referenced from:
+#   * each obs cfg under `ur3/sensor_cfgs/` (via their `from:` dotted
+#     paths — the producer publishes UR3 fields under `robot.ur3.*`),
+#   * each action mode under `ur3/action_modes/` (via their `to:` field,
+#     e.g. `robot.ur3.tcp_command`).
+#
+# Lab default values come from
+# /home/labpc2x2080ti/tactile_data_recording/data_recording/record_data_gui_new.py
+# (`HIGH_RATE_FORCE_HZ`, `read_gripper_state` JSON path, etc.).
+
+# Connection fields — Ur3BirEnv uses these to build the UR3Client.
+host: 192.168.20.25                      # ROBOT_HOST_OVERRIDE; populate per-rig
+rtde_port: 30004
+high_rate_force_hz: 50                   # HIGH_RATE_FORCE_HZ
+control_mode_pin: 7                      # teleop digital-out; obs only at deploy
+# Capture script writes the gripper JSON to this path
+# (record_data_gui_new.py:read_gripper_state, line 770). The deploy
+# host needs the same path (or override per-rig).
+gripper_state_path: /tmp/ur_gripper_state.json
+
+# Action-sink params — the executor reads `kind` to pick the RTDE call,
+# remaining fields are kwargs for that call. Referenced from action
+# modes via `to: robot.ur3.tcp_command`.
+tcp_command:
+  kind: rtde_servoL                      # RTDEControlInterface.servoL(...)
+  lookahead_time: 0.1
+  gain: 300

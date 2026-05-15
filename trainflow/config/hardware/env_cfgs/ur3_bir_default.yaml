@@ -1,0 +1,43 @@
+# Lab default env_cfg for UR3 BIR (single-arm).
+#
+# Carries CONNECTION + DEPLOY-TIME state — i.e. anything that varies
+# per-rig or per-deployment but NOT per-sensor (those live in
+# `hardware/sensor_cfgs/*.yaml` and `hardware/ur3/sensor_cfgs/*.yaml`).
+#
+# Each task yaml composes this via:
+#   defaults:
+#     - /hardware/env_cfgs@hardware: ur3_bir_default
+# and then layers in the sensor/action cfgs it needs.
+#
+# Per-scenario env_cfgs (e.g. `ur3_pos_force_vis_vrr.yaml`) would
+# inherit from this file and add the sensor+action composition; for
+# now task yamls do that composition directly.
+
+defaults:
+  - /hardware/ur3/ur3_base@clients.robot.ur3
+  - _self_
+
+schema_version: 1
+
+# Synchronized capture rate (5 Hz in record_data_gui_new.py:1626).
+control_fps: 5
+
+# Per-obs-key: ops that were ALREADY applied to the raw frames at
+# CAPTURE TIME for this dataset. ObsBuilder skips matching ops at
+# deploy so the live tensor reproduces what zarr_writer wrote to disk.
+#
+# Lab default = empty (the new collection script writes raw frames).
+# Legacy-dataset env_cfgs override this with e.g.
+#   applied_at_capture:
+#     rgb: [crop_x, resize]
+applied_at_capture:
+  rgb: []
+  rgb_hand: []
+
+# Active tactile backend — gates whether GelsightClient instances
+# are spawned by Ur3BirEnv. The per-slot cfgs (sensor_cfgs/gs_slot*.yaml)
+# carry the device-side params; this top-level flag is the on/off switch.
+tactile:
+  mode: gelsight                   # gelsight | dmtac | none
+  dmtac:
+    enabled: false                 # reserved; client deferred

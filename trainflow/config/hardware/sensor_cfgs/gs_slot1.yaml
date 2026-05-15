@@ -1,0 +1,17 @@
+# GelSight Mini — sorted-slot 1 of /dev/v4l/by-id.
+# See `gs_slot0.yaml` for the slot/paths convention.
+
+client:
+  kind: gelsight
+  slot: 1
+  paths: null                            # null → discover_gelsight_devices()
+  record_size: [320, 240]
+  fps: 25
+  fourcc: MJPG
+  warmup_frames: 30
+
+shape: [3, 240, 320]
+type: rgb
+from: tactile.gelsight.1.rgb
+ops:
+  - {name: bgr_to_rgb}

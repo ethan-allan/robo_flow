@@ -1,0 +1,25 @@
+# Platform RealSense — workspace-fixed RGB stream.
+#
+# Self-contained spec: how to open the camera + how to post-process its
+# frames. The env_cfg composes this into `shape_meta.obs.<key>` (lab
+# default key: `rgb`); the producer reads the `client:` block to build
+# a `RealsenseClient`, and the `ops:` chain runs per-frame to match
+# what the dataset stored on disk.
+#
+# 640x480 BGR uint8 live → crop_x to capture-script ROI → resize 256x256
+# → BGR→RGB. End result matches zarr_writer output bit-for-bit.
+
+client:
+  kind: realsense
+  serial: 248622300418                           # set per-rig in the env_cfg
+  width: 640
+  height: 480
+  fps: 15
+
+shape: [3, 256, 256]
+type: rgb
+from: cameras.platform_realsense.rgb     # dotted path into the producer's flat raw_obs
+ops:
+  - {name: crop_x, x0: 280, x1: 1000}    # record_data_gui_new.py:1697
+  - {name: resize, size: [256, 256]}
+

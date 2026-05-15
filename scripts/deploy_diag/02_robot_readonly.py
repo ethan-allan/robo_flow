@@ -6,10 +6,11 @@ stddev so cable/noise issues fail loudly. The script NEVER sends a
 motion command — Phase C runs with the e-stop pressed and the operator
 verifying that the teach-pendant readout matches what's printed.
 
+Loads the UR3 connection cfg from `hardware/ur3/ur3_base.yaml` via
+hydra. Override the host on the CLI to point at a different controller.
+
 Usage:
-    python -m scripts.deploy_diag.02_robot_readonly \\
-        --hw trainflow/config/hardware/ur3_bir_default.yaml \\
-        --duration 60 --rate 5
+    python -m scripts.deploy_diag.02_robot_readonly --duration 60 --rate 5
 
 Go/no-go criteria are in scripts/deploy_diag/README.md (Phase C).
 """
@@ -21,27 +22,34 @@ import time
 from pathlib import Path
 
 import numpy as np
-from omegaconf import OmegaConf
+from hydra import initialize_config_dir, compose
 
 from trainflow.env.ur3_bir.discover import detect_ur_robot
 from trainflow.env.ur3_bir.sensor_clients import UR3Client
 
 
+REPO = Path(__file__).resolve().parents[2]
+CFG_DIR = REPO / "trainflow" / "config"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--hw", type=Path, default=Path(
-        "trainflow/config/hardware/ur3_bir_default.yaml"))
+    ap.add_argument("--host", default=None,
+                    help="Override cfg.host (ur3_base.yaml).")
     ap.add_argument("--duration", type=float, default=60.0)
     ap.add_argument("--rate", type=float, default=5.0)
     ap.add_argument("--skip-probe", action="store_true",
                     help="Skip the ping/RTDE probe; assume cfg.host is reachable.")
     args = ap.parse_args()
 
-    if not args.hw.exists():
-        print(f"[fatal] hw cfg not found: {args.hw}", file=sys.stderr)
+    with initialize_config_dir(version_base=None, config_dir=str(CFG_DIR)):
+        cfg = compose(config_name="hardware/ur3/ur3_base")
+    robot_cfg = cfg.hardware.ur3
+    if args.host is not None:
+        robot_cfg.host = args.host
+    if not robot_cfg.get("host"):
+        print("[fatal] ur3 host unset (pass --host)", file=sys.stderr)
         return 2
-    hw_cfg = OmegaConf.load(str(args.hw))
-    robot_cfg = hw_cfg.robot.ur3
 
     if not args.skip_probe:
         host = str(robot_cfg.host)
