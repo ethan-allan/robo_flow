@@ -1,0 +1,13 @@
+# UR3 end-effector state, 9D ortho6d encoding.
+#
+# Concat the TCP pose (6D = xyz + axis-angle) with gripper width (1D)
+# into a 7D vector, then convert rotation to ortho6d giving 9D total.
+# The gripper width is dropped during the 7->9 conversion (it is not
+# part of the 9D pose representation); the action executor sources
+# gripper commands separately when needed.
+shape: [9]
+type: low_dim
+from: [robot.ur3.tcp_pose6, robot.ur3.gripper_width]
+ops:
+  - {name: concat}
+  - {name: pose7_to_pose9}

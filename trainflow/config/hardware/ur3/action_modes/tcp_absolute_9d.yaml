@@ -1,0 +1,16 @@
+# Single-sink absolute pose mode.
+#
+# Model emits 9D = xyz + ortho6d. The whole vector decodes to a 6D
+# axis-angle TCP target sent via RTDE servoL. No virtual target, no
+# stiffness — used by tasks that don't need impedance control.
+#
+# Mounted into a task yaml via:
+#   defaults:
+#     - /action_modes@shape_meta.action: tcp_absolute_9d
+shape: [9]
+out:
+  tcp_target:
+    slice: [0, 9]
+    to: robot.ur3.tcp_command
+    ops:
+      - {name: pose9_to_pose6}

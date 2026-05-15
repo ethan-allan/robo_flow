@@ -1,3 +1,16 @@
+# Task identity + dataset paths + composed deploy stack.
+#
+# Sensor pipelines and the action mode are composed from
+# `config/sensor_pipelines/` and `config/action_modes/`. To swap a
+# sensor/mode, edit those — not this file.
+defaults:
+  - _task_base
+  - /hardware: ur3_bir_default
+  - /hardware/sensor_pipelines@shape_meta.obs.rgb:        platform_realsense_rgb
+  - /hardware/sensor_pipelines@shape_meta.obs.eef_state:  ur3_eef_state
+  - /hardware/sensor_pipelines@shape_meta.obs.eef_force:  ur3_eef_force
+  - /hardware/ur3/action_modes@shape_meta.action:         vrr_19d
+  - _self_
 
 name: peg_insertion_vrr_5fps
 
@@ -8,23 +21,10 @@ image_resize_shape: null
 raw_episodes: trainflow/dataset/peg_hole_tac          # source: per-episode .npy dirs
 dataset_path: data/replay_buffers/peg_insertion_vrr_5fps  # destination: bundled zarr
 
-shape_meta:
-  # acceptable types: rgb, low_dim
-  obs:
-    rgb:
-      shape: ${task.image_shape}
-      type: rgb
-    eef_state:
-      shape: [9]
-      type: low_dim
-    eef_force:
-      shape: [6]
-      type: low_dim
-  action:
-    shape: [19] # (3+6 + 3+6 + 1) (x, y, z, 6d rotation, virtual_x, virtual_y, virtual_z, virtual_6d rotation, stiffness)
-    type: 6DOF_vrr
+# `model_shape_meta` is a separate, training-only contract — keeps the
+# 19D ortho6d action collapsed to 13D (rpy) for the model head. Lives
+# inline because it is not part of the deploy-side stack.
 model_shape_meta:
-  # acceptable types: rgb, low_dim
   obs:
     rgb:
       shape: ${task.image_shape}
@@ -36,21 +36,8 @@ model_shape_meta:
       shape: [6]
       type: low_dim
   action:
-    shape: [13] # (3+3 + 3+3 + 1) (x, y, z, r, p, y, virtual_x, virtual_y, virtual_z, virtual_r, virtual_p, virtual_y, stiffness) — collapsed from 19D ortho6d via rpy_for_rotation
+    shape: [13] # collapsed from 19D ortho6d via rpy_for_rotation
     type: 6DOF_vrr
 
 dataset:
-  _target_: trainflow.dataset.real_image_tactile_dataset.RealImageTactileDataset
-  shape_meta: ${task.shape_meta}
-  dataset_path: ${task.dataset_path}
-  horizon: ${horizon}
-  pad_before: ${eval:'${dataset_obs_steps}-1+${n_latency_steps}'}
-  pad_after: ${eval:'${n_action_steps}-1'}
-  n_obs_steps: ${dataset_obs_steps}
-  n_latency_steps: ${n_latency_steps}
-  seed: 42
-  val_ratio: 0.1
-  max_train_episodes: null
-  delta_action: False
-  relative_action: False
   rpy_for_rotation: True

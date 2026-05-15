@@ -1,0 +1,24 @@
+# Virtual-reference-residual (VRR) impedance-control mode.
+#
+# Model emits 19D = real TCP pose9 + virtual target pose9 + scalar
+# stiffness. Each block is decoded independently and dispatched to its
+# own actuator sink in the executor (step 6).
+#
+# Mounted into a task yaml via:
+#   defaults:
+#     - /action_modes@shape_meta.action: vrr_19d
+shape: [19]
+type: 6DOF_vrr
+out:
+  tcp_target:
+    slice: [0, 9]                          # xyz + ortho6d
+    to: robot.ur3.tcp_command
+    ops: [{name: pose9_to_pose6}]
+  virtual_target:
+    slice: [9, 18]                         # virtual_xyz + virtual_ortho6d
+    to: robot.ur3.virtual_target
+    ops: [{name: pose9_to_pose6}]
+  stiffness:
+    slice: [18, 19]
+    to: robot.ur3.stiffness
+    ops: []

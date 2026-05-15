@@ -1,5 +1,6 @@
 defaults:
   - task: real_peel_image_dp_absolute_12fps
+  - workspace_base
   - _self_
 
 name: train_diffusion_transformer_image
@@ -27,7 +28,7 @@ ckpt_path: null
 policy:
   _target_: trainflow.policy.diffusion_transformer_image_policy.DiffusionTransformerImagePolicy
 
-  shape_meta: ${task.model_shape_meta}
+  shape_meta: ${shape_meta}
   
   noise_scheduler:
     _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
@@ -44,7 +45,7 @@ policy:
 
   obs_encoder:
     _target_: trainflow.model.vision.transformer_obs_encoder.TransformerObsEncoder
-    shape_meta: ${task.model_shape_meta}
+    shape_meta: ${shape_meta}
     obs_horizon: ${n_obs_steps}
     global_pool: ''
     n_emb: ${n_emb}
@@ -89,7 +90,7 @@ policy:
 
   model:
     _target_: trainflow.model.diffusion.transformer_for_diffusion.TransformerForDiffusion
-    shape_meta: ${task.model_shape_meta}
+    shape_meta: ${shape_meta}
     action_horizon: ${horizon}
     n_obs_steps: ${n_obs_steps}
     cond_dim: ${n_emb}
@@ -111,28 +112,6 @@ policy:
 
   use_amp_for_inference: False
   amp_dtype: "bf16"
-
-ema:
-  _target_: trainflow.model.diffusion.ema_model.EMAModel
-  update_after_step: 0
-  inv_gamma: 1.0
-  power: 0.75
-  min_value: 0.0
-  max_value: 0.9999
-
-dataloader:
-  batch_size: 64
-  num_workers: 8
-  shuffle: True
-  pin_memory: True
-  persistent_workers: True
-
-val_dataloader:
-  batch_size: 64
-  num_workers: 8
-  shuffle: False
-  pin_memory: True
-  persistent_workers: True
 
 optimizer:
   lr: 3.0e-4
@@ -191,28 +170,3 @@ logging:
   id: null
   group: null
 
-checkpoint:
-  topk:
-    # val_action_mse_error is logged in workspace .py via log_action_mse(..., 'val', ...)
-    # whenever (epoch % sample_every) == 0 and val_dataloader is non-empty.
-    # Keep checkpoint_every a multiple of sample_every or this key will be missing
-    # and TopKCheckpointManager.get_ckpt_path will KeyError.
-    monitor_key: val_action_mse_error
-    mode: min
-    k: 1
-    format_str: 'epoch={epoch:04d}-val_action_mse={val_action_mse_error:.4f}.ckpt'
-  save_last_ckpt: True
-  save_last_snapshot: False
-
-multi_run:
-  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
-  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
-
-hydra:
-  job:
-    override_dirname: ${name}
-  run:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
-  sweep:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
-    subdir: ${hydra.job.num}

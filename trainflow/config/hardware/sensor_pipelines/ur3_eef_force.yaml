@@ -1,0 +1,8 @@
+# UR3 6D end-effector wrench (Fx,Fy,Fz, Tx,Ty,Tz). Passthrough.
+#
+# zarr_writer applies the same astype(float32) at training time, so
+# no per-frame ops are required at deploy.
+shape: [6]
+type: low_dim
+from: robot.ur3.eef_force
+ops: []

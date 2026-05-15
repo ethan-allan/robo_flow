@@ -270,30 +270,22 @@ class RealImageTactileDataset(BaseImageDataset):
         # this slice does nothing (takes all)
         obs_downsample_ratio = self.obs_downsample_ratio
 
-        obs_dict = dict()
-        for key in self.rgb_keys:
-            T_slice = slice(self.n_obs_steps)
-            # move channel last to channel first
-            # T,H,W,C
-            # convert uint8 image to float32
-            obs_dict[key] = np.moveaxis(data[key][T_slice][::-obs_downsample_ratio][::-1],-1,1
-                ).astype(np.float32) / 255.
-            # T,C,H,W
-            # save ram
-            if key not in self.rgb_keys:
-                del data[key]
+        # Window formatting (T_slice + downsample + reverse + per-type
+        # cast/moveaxis/truncate) is shared with the deploy env via
+        # trainflow.common.obs_format.format_obs_window — keeps train
+        # and deploy formatting bit-equal by construction.
+        from trainflow.common.obs_format import format_obs_window
+        obs_dict = format_obs_window(
+            stacked={k: data[k] for k in self.rgb_keys + self.lowdim_keys
+                     if 'wrt' not in k},
+            shape_meta_obs=self.shape_meta['obs'],
+            n_obs_steps=self.n_obs_steps,
+            obs_downsample_ratio=obs_downsample_ratio,
+        )
+        # save ram: drop source arrays we won't reuse below
         for key in self.lowdim_keys:
-            if 'wrt' not in key:
-                T_slice = slice(self.n_obs_steps)
-                if len(self.shape_meta['obs'][key]['shape']) == 1:
-                    obs_dict[key] = data[key][:, :self.shape_meta['obs'][key]['shape'][0]][T_slice][::-obs_downsample_ratio][::-1].astype(np.float32)
-                elif len(self.shape_meta['obs'][key]['shape']) == 2:
-                    obs_dict[key] = data[key][:, :self.shape_meta['obs'][key]['shape'][0], :self.shape_meta['obs'][key]['shape'][1]][T_slice][::-obs_downsample_ratio][::-1].astype(np.float32)
-                else:
-                    raise ValueError(f"Only support 1d or 2d obs")
-                # save ram
-                if key not in self.extended_lowdim_keys:
-                    del data[key]
+            if key not in self.extended_lowdim_keys and 'wrt' not in key:
+                del data[key]
 
         # Stripped: bimanual inter-gripper relative action computation removed
         # (kept the dataset single-arm / vision-only).

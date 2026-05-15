@@ -1,0 +1,53 @@
+# Shared workspace defaults. Pulled into each top-level workspace config
+# (train_diffusion_unet_*, train_diffusion_transformer_*, train_reactive_*)
+# via `defaults: - workspace_base`. Only blocks that are byte-identical
+# across all three workspaces live here. Per-workspace overrides (policy,
+# optimizer, training, logging.project) stay in the workspace file.
+
+ema:
+  _target_: trainflow.model.diffusion.ema_model.EMAModel
+  update_after_step: 0
+  inv_gamma: 1.0
+  power: 0.75
+  min_value: 0.0
+  max_value: 0.9999
+
+dataloader:
+  batch_size: 64
+  num_workers: 8
+  shuffle: True
+  pin_memory: True
+  persistent_workers: True
+
+val_dataloader:
+  batch_size: 64
+  num_workers: 8
+  shuffle: False
+  pin_memory: True
+  persistent_workers: True
+
+checkpoint:
+  topk:
+    # val_action_mse_error is logged in workspace.py via log_action_mse(..., 'val', ...)
+    # whenever (epoch % sample_every) == 0 and val_dataloader is non-empty.
+    # Keep checkpoint_every a multiple of sample_every or this key will be missing
+    # and TopKCheckpointManager.get_ckpt_path will KeyError.
+    monitor_key: val_action_mse_error
+    mode: min
+    k: 1
+    format_str: 'epoch={epoch:04d}-val_action_mse={val_action_mse_error:.4f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    subdir: ${hydra.job.num}

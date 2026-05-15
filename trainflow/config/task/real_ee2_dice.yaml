@@ -1,33 +1,19 @@
+# Task identity + dataset path + composed deploy stack.
+#
+# Sensor pipelines (per model input) and the action mode are composed
+# from `config/sensor_pipelines/` and `config/action_modes/` so this
+# yaml stays small. To swap the camera, the action mode, or to add a
+# new input, edit the corresponding cfg under those directories — no
+# change here required.
+defaults:
+  - _task_base
+  - /hardware: ur3_bir_default
+  - /hardware/sensor_pipelines@shape_meta.obs.rgb:        platform_realsense_rgb
+  - /hardware/sensor_pipelines@shape_meta.obs.eef_state:  ur3_eef_state
+  - /hardware/ur3/action_modes@shape_meta.action:         tcp_absolute_9d
+  - _self_
 
 name: real_ee2_dice
-
 image_shape: [3, 256, 256]
-image_resize_shape: null   # square source; no encoder-side resize
+image_resize_shape: null
 dataset_path: data/ee2dice_zarr
-
-shape_meta: &shape_meta
-  # acceptable types: rgb, low_dim
-  obs:
-    rgb:
-      shape: ${task.image_shape}
-      type: rgb
-    eef_state:
-      shape: [9]
-      type: low_dim
-  action:
-    shape: [9] # (3+6) (x, y, z, 6d rotation)
-
-dataset:
-  _target_: trainflow.dataset.real_image_tactile_dataset.RealImageTactileDataset
-  shape_meta: *shape_meta
-  dataset_path: ${task.dataset_path}
-  horizon: ${horizon}
-  pad_before: ${eval:'${dataset_obs_steps}-1+${n_latency_steps}'}
-  pad_after: ${eval:'${n_action_steps}-1'}
-  n_obs_steps: ${dataset_obs_steps}
-  n_latency_steps: ${n_latency_steps}
-  seed: 42
-  val_ratio: 0.1
-  max_train_episodes: null
-  delta_action: False
-  relative_action: False
