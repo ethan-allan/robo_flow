@@ -1,12 +1,5 @@
 # GelSight Mini — sorted-slot 0 of /dev/v4l/by-id.
-#
-# Slot 0/1 are stable as long as the same sensors stay plugged in; the
-# producer calls `discover_gelsight_devices()` (which sorts by-id paths)
-# and indexes by `client.slot`.
-#
-# Live capture is sensor-native (3280x2464 MJPG); the client resizes to
-# `record_size` per frame to match what the upstream capture script
-# (record_data_gui_new.py:626) wrote to disk.
+
 
 client:
   kind: gelsight

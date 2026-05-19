@@ -40,7 +40,7 @@ def pose7_to_pose9(arr: np.ndarray) -> np.ndarray:
     Drops col 6 (gripper) — it is not part of the 9-D pose representation.
     The deployment-side inverse is `pose9_to_pose6`; gripper is sourced
     separately by the action executor. Accepts either a single (7,) frame
-    or a batch (T, 7) — needed because the deploy obs_builder calls this
+    or a batch (T, 7) — needed because the deploy obs_processor calls this
     per-frame while zarr_writer calls it batched.
     """
     assert arr.shape[-1] == 7, f"expected last dim 7, got {arr.shape}"

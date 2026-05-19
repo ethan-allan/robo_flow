@@ -10,7 +10,7 @@ to a stacked obs window. Used by both:
 
 Keeping this in one function means the dataset-side and deploy-side
 final formatting cannot drift. Per-frame preprocessing (zarr_writer
-ops at train time, ObsBuilder ops at deploy time) is upstream of this
+ops at train time, ObsProcessor ops at deploy time) is upstream of this
 function; this only handles the window-level work.
 """
 from __future__ import annotations

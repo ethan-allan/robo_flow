@@ -23,38 +23,14 @@ from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 import numpy as np
-from omegaconf import DictConfig
 
 from .base_client import BaseSensorClient
 
 
 class RealsenseClient(BaseSensorClient):
-    # -- replay -------------------------------------------------------------
-
-    @classmethod
-    def from_npy_replay(
-        cls,
-        cfg: DictConfig,
-        episode_dir: Path,
-        idx_ref: list[int],
-        replay_key: str = "rgb",
-        **kwargs: Any,
-    ) -> "RealsenseClient":
-        self = cls.__new__(cls)
-        BaseSensorClient.__init__(self, cfg)
-        self._replay_mode = True
-        self._idx_ref = idx_ref
-        self._replay_key = replay_key
-        ep = Path(episode_dir)
-        self._rgb = np.load(ep / f"{replay_key}.npy")              # (T, H, W, 3)
-        depth_path = ep / f"depth{replay_key[3:]}.npy"             # depth or depth_hand
-        self._depth = np.load(depth_path) if depth_path.exists() else None
-        self._frame_ts = np.load(ep / "frame_timestamp.npy")
-        return self
 
     # -- live ---------------------------------------------------------------
 

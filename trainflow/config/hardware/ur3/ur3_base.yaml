@@ -12,7 +12,7 @@
 # (`HIGH_RATE_FORCE_HZ`, `read_gripper_state` JSON path, etc.).
 
 # Connection fields — Ur3BirEnv uses these to build the UR3Client.
-host: 192.168.20.25                      # ROBOT_HOST_OVERRIDE; populate per-rig
+host: 192.168.201.101                    # ROBOT_HOST_OVERRIDE; populate per-rig
 rtde_port: 30004
 high_rate_force_hz: 50                   # HIGH_RATE_FORCE_HZ
 control_mode_pin: 7                      # teleop digital-out; obs only at deploy

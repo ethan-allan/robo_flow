@@ -49,7 +49,7 @@ def _load_task(name: str):
 
 
 def _mark_legacy_capture(task_cfg):
-    """Tell ObsBuilder which rgb ops were already applied at capture
+    """Tell ObsProcessor which rgb ops were already applied at capture
     time for legacy peg_hole_tac episodes (crop_x + resize ran in the
     capture script before rgb.npy was saved). The bgr_to_rgb op stays
     in the chain because zarr_writer also calls bgr_to_rgb on load.

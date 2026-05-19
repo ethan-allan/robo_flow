@@ -23,7 +23,7 @@ schema_version: 1
 control_fps: 5
 
 # Per-obs-key: ops that were ALREADY applied to the raw frames at
-# CAPTURE TIME for this dataset. ObsBuilder skips matching ops at
+# CAPTURE TIME for this dataset. ObsProcessor skips matching ops at
 # deploy so the live tensor reproduces what zarr_writer wrote to disk.
 #
 # Lab default = empty (the new collection script writes raw frames).

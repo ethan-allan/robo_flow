@@ -1,4 +1,4 @@
-"""Per-frame obs builder driven by the task yaml's `shape_meta.obs` block.
+"""Per-frame obs processor driven by the task yaml's `shape_meta.obs` block.
 
 For each `shape_meta.obs.<key>`:
   1. Look up `from`. May be:
@@ -18,7 +18,7 @@ For each `shape_meta.obs.<key>`:
 
 Capture-time preprocessing skip:
     Each sensor block in the hw cfg may carry `applied_at_capture: [<op_name>, ...]`.
-    When the obs_builder encounters an op whose name appears in that
+    When the obs_processor encounters an op whose name appears in that
     list for the primary sensor, the op is SKIPPED (input passes through
     unchanged). This is how the framework handles legacy datasets where
     some preprocessing ran in the capture script and is already present
@@ -48,8 +48,8 @@ OP_REGISTRY: dict[str, Any] = {
 }
 
 
-class ObsBuilder:
-    """Stateless per-frame builder. Construct once per env, call
+class ObsProcessor:
+    """Stateless per-frame processor. Construct once per env, call
     `build_frame(sensor_outputs)` each tick."""
 
     def __init__(self, shape_meta_obs: DictConfig, hw_cfg: DictConfig):

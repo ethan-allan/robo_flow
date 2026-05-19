@@ -28,35 +28,7 @@ from omegaconf import DictConfig
 from .base_client import BaseSensorClient
 
 
-class UR3Client(BaseSensorClient):
-    # -- replay -------------------------------------------------------------
-
-    @classmethod
-    def from_npy_replay(
-        cls,
-        cfg: DictConfig,
-        episode_dir: Path,
-        idx_ref: list[int],
-        **kwargs: Any,
-    ) -> "UR3Client":
-        self = cls.__new__(cls)
-        BaseSensorClient.__init__(self, cfg)
-        self._replay_mode = True
-        self._idx_ref = idx_ref
-        ep = Path(episode_dir)
-
-        self._eef_state = np.load(ep / "eef_state.npy")           # (T, 7)
-        self._eef_force = np.load(ep / "eef_force.npy")           # (T, 6)
-        self._joint_state = np.load(ep / "joint_state.npy")       # (T, 7)
-        self._current = np.load(ep / "current.npy")               # (T, 6)
-        self._control_mode = np.load(ep / "control_mode.npy")     # (T, 1)
-        self._frame_ts = np.load(ep / "frame_timestamp.npy")      # (T,)
-        if self._eef_state.shape[1] != 7:
-            raise ValueError(
-                f"{ep.name}: eef_state expected (T,7), got {self._eef_state.shape}"
-            )
-        return self
-
+class UR3Client(BaseSensorClient):   
     # -- live ---------------------------------------------------------------
 
     def start(self) -> None:

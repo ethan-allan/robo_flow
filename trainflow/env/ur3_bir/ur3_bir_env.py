@@ -1,6 +1,6 @@
 """Single-arm UR3 BIR deployment env.
 
-Wires sensor clients to obs_builder and exposes `get_obs()` whose
+Wires sensor clients to obs_processor and exposes `get_obs()` whose
 output matches `RealImageTactileDataset.__getitem__` bit-for-bit on the
 same frames. Action execution lives in step 6 (`action_executor.py`);
 this module is read-only at deploy time.
@@ -33,7 +33,7 @@ from omegaconf import DictConfig, ListConfig
 from omegaconf.errors import ConfigKeyError, ConfigAttributeError
 
 from trainflow.common.obs_format import format_obs_window
-from trainflow.env.ur3_bir.obs_builder import ObsBuilder
+from trainflow.env.ur3_bir.obs_processor import ObsProcessor
 from trainflow.env.ur3_bir.sensor_clients import (
     GelsightClient,
     RealsenseClient,
@@ -256,7 +256,7 @@ class Ur3BirEnv:
 
         self._ep_dir = Path(episode_dir) if episode_dir is not None else None
         self._clients = self._build_clients()
-        self._obs_builder = ObsBuilder(self.shape_meta.obs, self.hw)
+        self._obs_processor = ObsProcessor(self.shape_meta.obs, self.hw)
 
         cap = buffer_capacity if buffer_capacity is not None else max(
             self.n_obs_steps * max(self.obs_downsample_ratio, 1) + 4, 32
@@ -375,7 +375,7 @@ class Ur3BirEnv:
             t0 = time.monotonic()
             try:
                 sensor_outputs = {p: c.get_latest() for p, c in self._clients.items()}
-                frame = self._obs_builder.build_frame(sensor_outputs)
+                frame = self._obs_processor.build_frame(sensor_outputs)
                 ts = self._infer_ts(sensor_outputs)
                 self._buffer.push(ts, frame)
             except Exception as e:
@@ -396,14 +396,14 @@ class Ur3BirEnv:
 
     def tick_replay(self) -> None:
         """Read each client at the current `idx_ref`, build one frame
-        via `obs_builder`, push into the ring buffer. Replay-only."""
+        via `obs_processor`, push into the ring buffer. Replay-only."""
         if self._ep_dir is None:
             raise RuntimeError(
                 "tick_replay is replay-only; live mode uses the producer "
                 "thread started by start()."
             )
         sensor_outputs = {p: c.get_latest() for p, c in self._clients.items()}
-        frame = self._obs_builder.build_frame(sensor_outputs)
+        frame = self._obs_processor.build_frame(sensor_outputs)
         ts = self._infer_ts(sensor_outputs)
         self._buffer.push(ts, frame)
 
