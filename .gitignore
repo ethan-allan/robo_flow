@@ -153,6 +153,7 @@ implicitrdp_venv/
 .venv/
 venv/
 env/
+!trainflow/env/
 
 # Editor settings
 .vscode/
