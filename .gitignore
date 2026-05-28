@@ -159,3 +159,10 @@ env/
 .vscode/
 .cursor/
 .idea/
+
+# Local vendored library artifacts
+.local_libs/
+
+# Scratch / temp notebooks
+**/temp.ipynb
+**/tmp/

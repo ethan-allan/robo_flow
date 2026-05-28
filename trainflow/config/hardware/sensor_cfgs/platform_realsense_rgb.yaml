@@ -11,7 +11,7 @@
 
 client:
   kind: realsense
-  serial: 248622300418                           # set per-rig in the env_cfg
+  serial: 335122272846                           # set per-rig in the env_cfg (this rig: D405)
   width: 640
   height: 480
   fps: 15

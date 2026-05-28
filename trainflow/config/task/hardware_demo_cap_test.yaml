@@ -9,13 +9,13 @@ defaults:
   - _task_base
   - /hardware/env_cfgs@hardware:                              ur3_bir_default
   - /hardware/sensor_cfgs@shape_meta.obs.rgb:                 platform_realsense_rgb
-  - /hardware/ur3/sensor_cfgs@shape_meta.obs.eef_state:       ur3_eef_state
+  - /hardware/sensor_cfgs@shape_meta.obs.tactile_0:           gs_slot0
+  - /hardware/sensor_cfgs@shape_meta.obs.tactile_1:           gs_slot1
+  - /hardware/ur3/sensor_cfgs@shape_meta.obs.eef_state:       ur3_eef_pose6
   - /hardware/ur3/action_modes@shape_meta.action:             tcp_absolute_9d
   - _self_
 
-name: real_ee2_dice
-image_shape: [3, 256, 256]
+name: hardware_demo_cap_test
+image_shape: [3, 640, 480]
 image_resize_shape: null
-dataset_path: data/ee2dice_zarr
-raw_episodes: data/ee2dice_raw
-
+dataset_path: data/hw_test

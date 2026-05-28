@@ -90,7 +90,7 @@ class RealsenseClient(BaseSensorClient):
             update: dict[str, Any] = {"ts": ts}
             if color_frame:
                 try:
-                    update["rgb"] = np.asarray(color_frame.get_data())
+                    update["rgb"] = np.asarray(color_frame.get_data()).copy()
                 except Exception:
                     pass
             if depth_frame:

@@ -12,6 +12,9 @@ client:
 
 shape: [3, 240, 320]
 type: rgb
-from: tactile.gelsight.1.rgb
+from: tactile.gelsight_1.rgb
 ops:
+  - {name: crop_x, x0: 40, x1: 280}      # 320w live -> center 240w (square)
+  - {name: resize, size: [320, 240]}     # (W, H) -> matches shape [3, 240, 320]
   - {name: bgr_to_rgb}
+

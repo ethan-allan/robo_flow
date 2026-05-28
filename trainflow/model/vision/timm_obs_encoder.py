@@ -1,7 +1,6 @@
 import copy
 
 import timm
-import peft
 import math
 import torch
 import torch.nn as nn
@@ -132,6 +131,7 @@ class TimmObsEncoder(ModuleAttrMixin):
 
         if use_lora:
             assert pretrained and not frozen
+            import peft  # lazy: avoids a transformers-version mismatch on the deploy PC
             lora_config = peft.LoraConfig(
                 r=lora_rank,
                 lora_alpha=8,

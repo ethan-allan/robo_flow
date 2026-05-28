@@ -5,12 +5,6 @@ output matches `RealImageTactileDataset.__getitem__` bit-for-bit on the
 same frames. Action execution lives in step 6 (`action_executor.py`);
 this module is read-only at deploy time.
 
-Step 4 only commits to the replay-mode path
-(`Ur3BirEnv.from_npy_replay`). Live mode raises until step 5+, but the
-ring-buffer architecture is shared: in live mode, sensor threads will
-push to the same `ObsRingBuffer` that the replay producer pushes to
-here. `get_obs()` reads the buffer tail in either case.
-
 This module also contains:
   * `ObsRingBuffer` — small enough that a separate file would be churn
   * `validate_task_cfg` — runs at __init__ to catch typos/gaps early
@@ -25,7 +19,6 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -33,6 +26,7 @@ from omegaconf import DictConfig, ListConfig
 from omegaconf.errors import ConfigKeyError, ConfigAttributeError
 
 from trainflow.common.obs_format import format_obs_window
+from trainflow.env.ur3_bir.action_executor import ActionExecutor
 from trainflow.env.ur3_bir.obs_processor import ObsProcessor
 from trainflow.env.ur3_bir.sensor_clients import (
     GelsightClient,
@@ -48,8 +42,7 @@ from trainflow.env.ur3_bir.sensor_clients import (
 class ObsRingBuffer:
     """Circular buffer of (ts, per-key obs dict).
 
-    A producer pushes per-frame entries (replay loop in offline mode,
-    sensor threads in live mode); `Ur3BirEnv.get_obs()` reads the
+    A producer pushes per-frame entries ; `Ur3BirEnv.get_obs()` reads the
     trailing `n_obs_steps` entries via `tail()`.
     """
 
@@ -90,30 +83,48 @@ class ObsRingBuffer:
 # Cfg validation
 # ---------------------------------------------------------------------------
 
-def _normalise_parent(parent: str) -> str:
-    """Mirror env._lookup's special cases. Keep in sync with
-    `Ur3BirEnv._lookup`."""
-    if parent.startswith("tactile.gelsight_"):
-        return "tactile.gelsight"
-    return parent
-
-
-def _resolves(hw_cfg, dotted: str) -> bool:
-    node = hw_cfg
-    for seg in dotted.split("."):
-        try:
-            node = node[seg]
-        except (KeyError, ConfigKeyError, ConfigAttributeError, TypeError):
-            return False
-    return True
-
-
 def _from_paths(from_field) -> list[str]:
     if isinstance(from_field, str):
         return [from_field]
     if isinstance(from_field, (list, tuple, ListConfig)):
         return [str(s) for s in from_field]
     return []
+
+
+def _resolve_sensor_cfg(task_cfg: DictConfig, parent: str) -> DictConfig | None:
+    """Return the cfg block for a sensor `parent` dotted path, or None.
+
+    Two routes depending on prefix:
+      * `robot.ur3` — shared connection cfg at `hardware.clients.robot.ur3`
+        (composed once per env_cfg; every obs that reads `robot.ur3.*`
+        uses the same client).
+      * `cameras.<name>` / `tactile.gelsight_<n>` — per-sensor cfg lives
+        on the matching `shape_meta.obs.<key>` entry. The entry's
+        `client:` sub-block carries connection params; the surrounding
+        fields (shape/type/from/ops) belong to obs processing. When
+        multiple obs keys share a parent (e.g. rgb + depth on one
+        camera), the first match wins.
+
+    Returns the resolved cfg block, or None if the parent is unknown
+    or the expected cfg is missing.
+    """
+    if parent == "robot.ur3":
+        try:
+            return task_cfg.hardware.clients.robot.ur3
+        except (KeyError, ConfigKeyError, ConfigAttributeError):
+            return None
+    if parent.startswith("cameras.") or parent.startswith("tactile.gelsight_"):
+        for cfg_key, attr in task_cfg.shape_meta.obs.items():
+            if "wrt" in cfg_key:
+                continue
+            from_field = attr.get("from", None) if hasattr(attr, "get") else None
+            if from_field is None:
+                continue
+            for path in _from_paths(from_field):
+                if str(path).rsplit(".", 1)[0] == parent:
+                    return attr
+        return None
+    return None
 
 
 def validate_task_cfg(task_cfg: DictConfig) -> list[str]:
@@ -128,7 +139,6 @@ def validate_task_cfg(task_cfg: DictConfig) -> list[str]:
     """
     errors: list[str] = []
     sm = task_cfg.shape_meta
-    hw = task_cfg.hardware
 
     # --- obs side ----------------------------------------------------------
     for cfg_key, attr in sm.obs.items():
@@ -140,11 +150,21 @@ def validate_task_cfg(task_cfg: DictConfig) -> list[str]:
         if "ops" not in attr:
             errors.append(f"shape_meta.obs.{cfg_key} missing required field `ops` (use [] for none)")
         for path in _from_paths(attr["from"]):
-            parent = _normalise_parent(path.rsplit(".", 1)[0])
-            if not _resolves(hw, parent):
+            parent = str(path).rsplit(".", 1)[0]
+            sensor_cfg = _resolve_sensor_cfg(task_cfg, parent)
+            if sensor_cfg is None:
                 errors.append(
                     f"shape_meta.obs.{cfg_key}: source parent {parent!r} (from path "
-                    f"{path!r}) does not resolve into hardware cfg"
+                    f"{path!r}) is not a recognised sensor parent or its cfg is "
+                    f"unreachable (cameras/tactile expect a sibling shape_meta.obs "
+                    f"entry; robot.ur3 expects hardware.clients.robot.ur3)"
+                )
+            elif (parent.startswith("cameras.") or parent.startswith("tactile.gelsight_")) \
+                    and "client" not in sensor_cfg:
+                errors.append(
+                    f"shape_meta.obs.{cfg_key}: parent {parent!r} resolves but the "
+                    f"shape_meta.obs entry has no `client:` sub-block (required to "
+                    f"instantiate the sensor client)"
                 )
 
     # --- action side -------------------------------------------------------
@@ -175,11 +195,11 @@ def validate_task_cfg(task_cfg: DictConfig) -> list[str]:
                         )
                         break
                     covered[i] = name
-            missing = [i for i, v in enumerate(covered) if v is None]
-            if missing:
-                errors.append(
-                    f"shape_meta.action.out: action indices {missing} not covered by any sink"
-                )
+            # Note: full coverage is NOT required. Some action dims are
+            # training-only targets (e.g. VRR's virtual_target + stiffness
+            # at indices [9, 19) are consumed by the impedance-control
+            # logic and never dispatched as actuator commands). Missing
+            # coverage is fine; overlap and out-of-range slices are not.
             for name, snk in sinks.items():
                 if "to" not in snk:
                     errors.append(f"shape_meta.action.out.{name}: missing `to` path")
@@ -197,23 +217,6 @@ def assert_task_cfg(task_cfg: DictConfig) -> None:
 # ---------------------------------------------------------------------------
 # Sensor client factory
 # ---------------------------------------------------------------------------
-
-def _client_factory(parent: str, cfg: DictConfig, ep_dir: Path | None,
-                    idx_ref: list[int]) -> Any:
-    """Map a sensor parent path to a client instance. Auditable in one place."""
-    if parent == "robot.ur3":
-        return UR3Client.from_npy_replay(cfg, ep_dir, idx_ref) if ep_dir else UR3Client(cfg)
-    if parent == "cameras.platform_realsense":
-        return (RealsenseClient.from_npy_replay(cfg, ep_dir, idx_ref, replay_key="rgb")
-                if ep_dir else RealsenseClient(cfg))
-    if parent == "cameras.hand_realsense":
-        return (RealsenseClient.from_npy_replay(cfg, ep_dir, idx_ref, replay_key="rgb_hand")
-                if ep_dir else RealsenseClient(cfg))
-    if parent.startswith("tactile.gelsight_"):
-        slot = int(parent.rsplit("_", 1)[1])
-        return (GelsightClient.from_npy_replay(cfg, ep_dir, idx_ref, slot=slot)
-                if ep_dir else GelsightClient(cfg, slot=slot))
-    raise NotImplementedError(f"sensor parent {parent!r} not handled")
 
 
 def _start_order(parents: list[str]) -> list[str]:
@@ -234,16 +237,14 @@ def _start_order(parents: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 class Ur3BirEnv:
-    """Replay-mode read-only env. Step 5/6 will add live mode + step()."""
 
     def __init__(
         self,
         task_cfg: DictConfig,
         n_obs_steps: int,
         obs_temporal_downsample_ratio: int = 1,
-        episode_dir: Path | None = None,
-        idx_ref: list[int] | None = None,
         buffer_capacity: int | None = None,
+        executor: ActionExecutor | None = None,
     ):
         assert_task_cfg(task_cfg)
 
@@ -252,18 +253,16 @@ class Ur3BirEnv:
         self.shape_meta = task_cfg.shape_meta
         self.n_obs_steps = int(n_obs_steps)
         self.obs_downsample_ratio = int(obs_temporal_downsample_ratio)
-        self.idx_ref = idx_ref if idx_ref is not None else [0]
 
-        self._ep_dir = Path(episode_dir) if episode_dir is not None else None
         self._clients = self._build_clients()
         self._obs_processor = ObsProcessor(self.shape_meta.obs, self.hw)
+        self._executor = executor
 
         cap = buffer_capacity if buffer_capacity is not None else max(
             self.n_obs_steps * max(self.obs_downsample_ratio, 1) + 4, 32
         )
         self._buffer = ObsRingBuffer(capacity=cap)
 
-        # Live-mode producer thread state. Replay mode never touches these.
         self._started = False
         self._producer_stop: threading.Event | None = None
         self._producer_thread: threading.Thread | None = None
@@ -272,67 +271,51 @@ class Ur3BirEnv:
     # -- construction helpers -------------------------------------------------
 
     def _build_clients(self) -> dict[str, Any]:
+        """Instantiate one client per sensor parent referenced by
+        `shape_meta.obs.<key>.from`. Returns {parent: client}; no
+        hardware is touched here — that happens in `start()` via each
+        client's `.start()`."""
         parents: set[str] = set()
         for cfg_key, attr in self.shape_meta.obs.items():
             if "wrt" in cfg_key:
                 continue
-            from_field = attr["from"]
-            paths = [from_field] if isinstance(from_field, str) else list(from_field)
-            for p in paths:
-                parents.add(str(p).rsplit(".", 1)[0])
+            for path in _from_paths(attr["from"]):
+                parents.add(str(path).rsplit(".", 1)[0])
+
         clients: dict[str, Any] = {}
         for parent in sorted(parents):
-            cfg = self._lookup(parent)
-            clients[parent] = _client_factory(parent, cfg, self._ep_dir, self.idx_ref)
+            cfg = _resolve_sensor_cfg(self.task_cfg, parent)
+            if cfg is None:
+                # validate_task_cfg should have caught this in __init__;
+                # raise here is defensive.
+                raise RuntimeError(f"no cfg for sensor parent {parent!r}")
+            if parent.startswith("cameras."):
+                clients[parent] = RealsenseClient(cfg.client)
+            elif parent.startswith("tactile.gelsight_"):
+                slot = int(parent.rsplit("_", 1)[1])
+                clients[parent] = GelsightClient(cfg.client, slot=slot)
+            elif parent == "robot.ur3":
+                clients[parent] = UR3Client(cfg)
+            else:
+                raise ValueError(
+                    f"unknown sensor parent {parent!r} — known prefixes: "
+                    f"cameras.*, tactile.gelsight_*, robot.ur3"
+                )
         return clients
-
-    def _lookup(self, dotted_path: str) -> Any:
-        if dotted_path.startswith("tactile.gelsight_"):
-            return self.hw.tactile.gelsight
-        node = self.hw
-        for seg in dotted_path.split("."):
-            node = node[seg]
-        return node
 
     # -- public API -----------------------------------------------------------
 
-    @classmethod
-    def from_npy_replay(
-        cls,
-        task_cfg: DictConfig,
-        episode_dir: Path,
-        n_obs_steps: int,
-        obs_temporal_downsample_ratio: int = 1,
-        idx_ref: list[int] | None = None,
-    ) -> "Ur3BirEnv":
-        return cls(
-            task_cfg=task_cfg,
-            n_obs_steps=n_obs_steps,
-            obs_temporal_downsample_ratio=obs_temporal_downsample_ratio,
-            episode_dir=Path(episode_dir),
-            idx_ref=idx_ref,
-        )
-
     def reset(self) -> None:
-        """Clear the obs buffer. In replay mode also rewinds `idx_ref`
-        to 0. In live mode, jog-to-home is the action executor's job
-        (stage 6) — this method does NOT move the robot."""
+        """Clear the obs buffer. Jog-to-home is the action executor's
+        job (stage 6) — this method does NOT move the robot."""
         self._buffer.clear()
-        if self._ep_dir is not None:
-            self.idx_ref[0] = 0
 
     # -- live mode ----------------------------------------------------------
 
     def start(self) -> None:
-        """Bring sensor clients up and spawn the producer thread. Live
-        mode only — a replay env reads through `seek_replay/tick_replay`.
+        """Bring sensor clients up and spawn the producer thread.
 
         Idempotent: a second start() is a no-op. Pairs with `stop()`."""
-        if self._ep_dir is not None:
-            raise RuntimeError(
-                "Ur3BirEnv.start() is live-mode only; replay envs use "
-                "tick_replay/seek_replay."
-            )
         if self._started:
             return
 
@@ -350,20 +333,36 @@ class Ur3BirEnv:
         self._started = True
 
     def stop(self) -> None:
-        """Stop the producer thread, then stop each client in reverse
-        startup order. Safe to call when not started."""
+        """Stop the producer thread, the executor (if any), then each
+        client in reverse startup order. Safe to call when not started."""
         if not self._started:
             return
         if self._producer_stop is not None:
             self._producer_stop.set()
         if self._producer_thread is not None:
             self._producer_thread.join(timeout=2.0)
+        if self._executor is not None:
+            try:
+                self._executor.stop()
+            except Exception:
+                pass
         for parent in reversed(_start_order(list(self._clients.keys()))):
             try:
                 self._clients[parent].stop()
             except Exception:
                 pass
         self._started = False
+
+    def step(self, action: np.ndarray) -> dict[str, np.ndarray]:
+        """Dispatch a model-output action vector via the wired executor.
+        Returns the per-sink decoded dict. Raises if no executor was
+        passed to __init__."""
+        if self._executor is None:
+            raise RuntimeError(
+                "Ur3BirEnv.step requires an executor; pass one to __init__ "
+                "(e.g. NoOpExecutor for dry-run, RtdeExecutor for motion)"
+            )
+        return self._executor.dispatch(action)
 
     def _producer_loop(self) -> None:
         """Snapshot all clients at control_fps, build one frame, push to
@@ -392,44 +391,19 @@ class Ur3BirEnv:
         Diagnostic — empty in the happy path."""
         return list(self._producer_errors)
 
-    # -- replay mode --------------------------------------------------------
-
-    def tick_replay(self) -> None:
-        """Read each client at the current `idx_ref`, build one frame
-        via `obs_processor`, push into the ring buffer. Replay-only."""
-        if self._ep_dir is None:
-            raise RuntimeError(
-                "tick_replay is replay-only; live mode uses the producer "
-                "thread started by start()."
-            )
-        sensor_outputs = {p: c.get_latest() for p, c in self._clients.items()}
-        frame = self._obs_processor.build_frame(sensor_outputs)
-        ts = self._infer_ts(sensor_outputs)
-        self._buffer.push(ts, frame)
-
-    def seek_replay(self, target_idx: int) -> None:
-        """Bring the buffer up to date so its tail ends at `target_idx`."""
-        if self._ep_dir is None:
-            raise RuntimeError("seek_replay only valid in replay mode")
-        self._buffer.clear()
-        for i in range(target_idx + 1):
-            self.idx_ref[0] = i
-            self.tick_replay()
-
     def get_obs(self) -> dict[str, np.ndarray]:
         """Return the trailing `n_obs_steps` frames as a dict of
         (T, ...) arrays formatted to match
         `RealImageTactileDataset.__getitem__`'s `obs_dict` exactly.
 
         Reads from the obs ring buffer. The buffer must have been
-        populated by `tick_replay` / `seek_replay` (replay) or by
-        sensor threads (live, step 5+). The window-level formatting is
+        populated by sensor threads. The window-level formatting is
         the same shared function the dataset uses.
         """
         if len(self._buffer) == 0:
             raise RuntimeError(
-                "ObsRingBuffer is empty — call seek_replay/tick_replay "
-                "(replay) or start sensor threads (live) before get_obs."
+                "ObsRingBuffer is empty — call start() to spawn the "
+                "producer thread before get_obs."
             )
 
         n = self.n_obs_steps

@@ -1,0 +1,10 @@
+# UR3 end-effector pose, 6D axis-angle.
+#
+# Raw TCP pose [x, y, z, rx, ry, rz] straight from
+# rtde_receive.getActualTCPPose. No ortho6d conversion, no gripper.
+# Pair with `ur3_eef_state` (9D) if you want both the natural-form
+# and the model-friendly encoding on disk simultaneously.
+shape: [6]
+type: low_dim
+from: robot.ur3.tcp_pose6
+ops: []

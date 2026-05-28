@@ -28,3 +28,15 @@ tcp_command:
   kind: rtde_servoL                      # RTDEControlInterface.servoL(...)
   lookahead_time: 0.1
   gain: 300
+  speed: 0.05                            # m/s; conservative for bring-up
+  acceleration: 0.5                      # m/s^2; conservative for bring-up
+  time: 0.2                              # s; servo interpolation duration (~ 1/control_fps)
+
+# RtdeExecutor safety clips. Per-tick caps applied to the decoded TCP
+# target before any servoL call. Bring-up defaults are intentionally
+# tight — relax once Phase F/G has shown the cmd path is sound.
+safety:
+  max_step_m: 0.01                       # per-tick xyz delta cap (m)
+  max_step_rad: 0.05                     # per-tick rot delta cap (rad)
+  workspace_bbox: null                   # [xmin, xmax, ymin, ymax, zmin, zmax] or null
+  force_abort_n: 30.0                    # ||F_xyz|| abort threshold (N)

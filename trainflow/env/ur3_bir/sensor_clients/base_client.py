@@ -44,7 +44,6 @@ class BaseSensorClient(ABC):
         ...
 
     @classmethod
-    @abstractmethod
     def from_npy_replay(
         cls,
         cfg: DictConfig,
@@ -57,5 +56,10 @@ class BaseSensorClient(ABC):
         `idx_ref` is a single-element list shared by every client and
         the env runner; mutating it advances all clients to the same
         frame on the next `get_latest()` call.
+
+        Default: not supported. Subclasses that need replay (currently
+        only `GelsightClient`) override this.
         """
-        ...
+        raise NotImplementedError(
+            f"{cls.__name__} does not implement from_npy_replay"
+        )

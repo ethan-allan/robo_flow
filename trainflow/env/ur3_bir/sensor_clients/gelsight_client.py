@@ -55,11 +55,19 @@ class GelsightClient(BaseSensorClient):
 
         fps = int(self.cfg.get("fps", 25))
         fourcc_str = str(self.cfg.get("fourcc", "MJPG"))
+        record_size = self.cfg.get("record_size", [320, 240])
+        width, height = int(record_size[0]), int(record_size[1])
 
-        cap = cv2.VideoCapture(path)
+        # Force the V4L2 backend. Without the hint, OpenCV picks a
+        # backend that can negotiate a mode the GelSight Mini doesn't
+        # deliver and capture wedges with `select() timeout` every 10s
+        # (observed on slot 1 of a 2-sensor rig).
+        cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
         if not cap.isOpened():
             raise RuntimeError(f"GelsightClient slot={self._slot}: cannot open {path}")
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc_str))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         cap.set(cv2.CAP_PROP_FPS, fps)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         # Discard warmup frames — the sensor outputs zeros for ~30 frames on connect.
